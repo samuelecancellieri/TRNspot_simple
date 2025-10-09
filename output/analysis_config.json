@@ -1,0 +1,50 @@
+{
+  "RANDOM_SEED": 42,
+  "QC_MIN_GENES": 200,
+  "QC_MIN_COUNTS": 500,
+  "QC_MAX_COUNTS": null,
+  "QC_PCT_MT_MAX": 20.0,
+  "QC_MIN_CELLS": 10,
+  "PLOT_DPI": 150,
+  "PLOT_FORMAT": "png",
+  "PLOT_FIGSIZE_SMALL": [
+    6,
+    4
+  ],
+  "PLOT_FIGSIZE_MEDIUM": [
+    12,
+    4
+  ],
+  "PLOT_FIGSIZE_LARGE": [
+    15,
+    10
+  ],
+  "PLOT_COLOR_PALETTE": "viridis",
+  "NORMALIZE_TARGET_SUM": 10000.0,
+  "HVGS_N_TOP_GENES": 2000,
+  "HVGS_MIN_MEAN": 0.0125,
+  "HVGS_MAX_MEAN": 3,
+  "HVGS_MIN_DISP": 0.5,
+  "PCA_N_COMPS": 50,
+  "PCA_SVDSOLVE": "arpack",
+  "NEIGHBORS_N_NEIGHBORS": 15,
+  "NEIGHBORS_N_PCS": 40,
+  "NEIGHBORS_METHOD": "umap",
+  "NEIGHBORS_METRIC": "euclidean",
+  "LEIDEN_RESOLUTION": 1.0,
+  "LOUVAIN_RESOLUTION": 1.0,
+  "UMAP_MIN_DIST": 0.5,
+  "UMAP_SPREAD": 1.0,
+  "UMAP_N_COMPONENTS": 2,
+  "GRN_N_JOBS": 10,
+  "GRN_MIN_TARGETS": 10,
+  "GRN_CONFIDENCE_THRESHOLD": 0.5,
+  "OUTPUT_DIR": "output",
+  "CACHE_DIR": ".cache",
+  "FIGURES_DIR": "figures",
+  "LOG_LEVEL": "INFO",
+  "VERBOSE": true,
+  "N_JOBS": -1,
+  "CHUNK_SIZE": 1000,
+  "LOW_MEMORY": false
+}
