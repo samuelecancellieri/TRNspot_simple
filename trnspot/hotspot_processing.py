@@ -121,6 +121,7 @@ def run_hotspot_analysis(hotspot_obj):
     module_scores = hotspot_obj.calculate_module_scores()
     print("  Module scores calculated")
 
+    module_scores.index.name = "cell_id"
     module_scores.to_csv(f"{config.OUTPUT_DIR}/hotspot/hotspot_module_scores.csv")
 
     hotspot_obj.adata.obs = hotspot_obj.adata.obs.merge(
