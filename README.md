@@ -22,6 +22,60 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
+## Quick Start
+
+### Complete Analysis Pipeline
+
+Run the full analysis pipeline from preprocessing through CellOracle and Hotspot:
+
+```bash
+# Run with example dataset (default)
+python run_complete_analysis.py
+
+# Or use the script directly
+python examples/complete_pipeline.py
+
+# Run with your own data
+python run_complete_analysis.py --input your_data.h5ad --output results --figures plots
+
+# Skip specific analyses
+python run_complete_analysis.py --skip-celloracle  # Skip GRN inference
+python run_complete_analysis.py --skip-hotspot      # Skip module identification
+
+# Custom parameters
+python run_complete_analysis.py --seed 123 --n-jobs 16 --min-genes 300
+
+# See all options
+python run_complete_analysis.py --help
+```
+
+The complete pipeline includes:
+
+1. **Data Loading** - Load h5ad/h5 files or use example dataset
+2. **Quality Control** - Cell and gene filtering with QC metrics
+3. **Preprocessing** - Normalization, HVG selection, PCA, clustering
+4. **CellOracle GRN Inference** - Gene regulatory network prediction
+5. **Hotspot Module Analysis** - Spatially autocorrelated gene modules
+6. **Summary Report** - Comprehensive analysis summary with output files
+
+Output structure:
+
+```
+output/
+├── preprocessed_adata.h5ad        # Preprocessed dataset
+├── analysis_summary.txt           # Analysis report
+├── celloracle/
+│   ├── oracle_object.celloracle.oracle
+│   └── grn_links.celloracle.links
+└── hotspot/
+    ├── autocorrelation_results.csv
+    ├── significant_genes.csv
+    └── gene_modules.csv
+figures/
+├── qc/                            # QC plots
+└── grn_analysis/                  # GRN visualizations
+```
+
 ## Usage
 
 ### Configuration and Reproducibility

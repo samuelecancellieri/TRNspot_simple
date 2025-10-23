@@ -4,6 +4,7 @@ Configuration settings for TRNspot package
 
 import numpy as np
 import random
+import os
 
 # ============================================================================
 # Random Seed Configuration
@@ -193,8 +194,17 @@ OUTPUT_DIR = "output"
 CACHE_DIR = ".cache"
 """Directory for caching intermediate results"""
 
-FIGURES_DIR = "figures"
+FIGURES_DIR = os.path.join(OUTPUT_DIR, "figures")
 """Default directory for saving figures"""
+
+FIGURES_DIR_QC = os.path.join(FIGURES_DIR, "qc")
+"""Directory for saving QC figures"""
+
+FIGURES_DIR_GRN = os.path.join(FIGURES_DIR, "grn")
+"""Directory for saving GRN figures"""
+
+FIGURES_DIR_HOTSPOT = os.path.join(FIGURES_DIR, "hotspot")
+"""Directory for saving Hotspot figures"""
 
 
 # ============================================================================
@@ -257,6 +267,7 @@ def set_scanpy_settings():
             dpi_save=SAVE_DPI,
             frameon=False,
             vector_friendly=True,
+            format=PLOT_FORMAT,
             facecolor="white",
         )
 
@@ -273,7 +284,7 @@ def set_scanpy_settings():
         sc.settings.figdir = FIGURES_DIR
 
         # Set logfile
-        sc.settings.logfile = OUTPUT_DIR + "/scanpy_log.txt"
+        sc.settings.logfile = os.path.join(OUTPUT_DIR, "scanpy_log.txt")
 
         print("Scanpy settings configured")
 
@@ -395,12 +406,3 @@ def update_config(**kwargs):
             print(f"Updated {key} = {value}")
         else:
             print(f"Warning: {key} is not a valid configuration parameter")
-
-
-# ============================================================================
-# Initialize on import
-# ============================================================================
-
-# Set random seed on import and configure scanpy
-set_random_seed(RANDOM_SEED)
-set_scanpy_settings()

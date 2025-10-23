@@ -67,7 +67,7 @@ try:
         cluster_column_name="paul15_clusters",
         embedding_name="X_draw_graph_fa",
         species="mouse",
-        raw_count_layer=None,
+        raw_count_layer="raw_counts",
         TG_to_TF_dictionary=None,  # Use CellOracle's base GRN
     )
     print("  ✓ Oracle object created successfully")

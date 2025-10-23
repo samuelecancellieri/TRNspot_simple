@@ -47,7 +47,7 @@ def create_oracle_object(
     base_GRN = None
     if species == "human":
         base_GRN = co.data.load_human_promoter_base_GRN()
-    if species == "mouse":
+    elif species == "mouse":
         base_GRN = co.data.load_mouse_promoter_base_GRN()
     else:
         print("if species is not human or mouse no base GRN is loaded")
@@ -56,6 +56,7 @@ def create_oracle_object(
     oracle = co.Oracle()
 
     if raw_count_layer:
+        print("Using raw counts layer for Oracle object creation.")
         # use raw counts to build the oracle object
         adata_cc.X = adata_cc.layers[raw_count_layer].copy()
         oracle.import_anndata_as_raw_count(
@@ -64,6 +65,7 @@ def create_oracle_object(
             embedding_name=embedding_name,
         )
     else:
+        print("Using normalized counts for Oracle object creation.")
         # use normalized counts to build the oracle object
         oracle.import_anndata_as_normalized_count(
             adata=adata,

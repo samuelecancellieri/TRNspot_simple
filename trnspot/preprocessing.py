@@ -2,6 +2,7 @@
 Data preprocessing module for TRNspot
 """
 
+import os
 import scanpy as sc
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -119,6 +120,9 @@ def perform_qc(
         inplace=True,
     )
 
+    # Set figure parameters
+    sc.settings.figdir = config.FIGURES_DIR_QC
+
     # violin of pre-filtering metrics
     sc.pl.violin(
         adata_cc,
@@ -126,6 +130,7 @@ def perform_qc(
         jitter=0.4,
         multi_panel=True,
         save=f"_pre_filter_{save_plots}" if save_plots else None,
+        show=None,
     )
     # scatter of pre-filtering metrics
     sc.pl.scatter(
@@ -134,6 +139,7 @@ def perform_qc(
         y="n_genes_by_counts",
         color="pct_counts_mt",
         save=f"_pre_filter_{save_plots}" if save_plots else None,
+        show=None,
     )
 
     # Apply filtering
@@ -343,13 +349,11 @@ def perform_grn_pre_processing(
     sc.pl.paga(adata_cc, show=None, save=None)
     print(f"  Computed PAGA for cluster key: {cluster_key}")
 
-    sc.tl.draw_graph(adata_cc, init_pos="paga", random_state=config.RANDOM_SEED)
+    sc.tl.draw_graph(adata_cc, init_pos="paga")
     sc.pl.draw_graph(adata_cc, color=cluster_key, show=None, save=None)
 
     if adata_cc.n_obs > cell_downsample:
         print(f"  Downsampling to {cell_downsample} cells for GRN analysis")
-        sc.pp.subsample(
-            adata_cc, n_obs=cell_downsample, random_state=config.RANDOM_SEED
-        )
+        sc.pp.subsample(adata_cc, n_obs=cell_downsample)
 
     return adata_cc
