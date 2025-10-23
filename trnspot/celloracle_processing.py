@@ -127,7 +127,7 @@ def run_PCA(oracle: co.Oracle):
         np.diff(np.diff(np.cumsum(oracle_cc.pca.explained_variance_ratio_)) > 0.002)
     )[0][0]
     ax.axvline(n_comps, c="k")
-    fig.savefig(config.FIGURES_DIR + "/pca_explained_variance.png")
+    fig.savefig(config.FIGURES_DIR_GRN + "/pca_explained_variance.png")
     plt.close("all")
 
     n_comps = min(n_comps, 50)
