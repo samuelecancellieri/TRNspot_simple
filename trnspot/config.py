@@ -67,13 +67,16 @@ SAVE_DPI = 300
 PLOT_FORMAT = "png"
 """Default format for saved figures"""
 
+PLOT_FIGSIZE_SQUARED = (6, 6)
+"""Square figure size"""
+
 PLOT_FIGSIZE_SMALL = (6, 4)
 """Small figure size"""
 
-PLOT_FIGSIZE_MEDIUM = (12, 4)
+PLOT_FIGSIZE_MEDIUM = (10, 7)
 """Medium figure size"""
 
-PLOT_FIGSIZE_LARGE = (15, 10)
+PLOT_FIGSIZE_LARGE = (20, 15)
 """Large figure size"""
 
 PLOT_COLOR_PALETTE = "viridis"
@@ -282,9 +285,6 @@ def set_scanpy_settings():
 
         # Set figure dir
         sc.settings.figdir = FIGURES_DIR
-
-        # Set logfile
-        sc.settings.logfile = os.path.join(OUTPUT_DIR, "scanpy_log.txt")
 
         print("Scanpy settings configured")
 

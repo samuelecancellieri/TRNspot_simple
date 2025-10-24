@@ -105,10 +105,10 @@ def run_hotspot_analysis(hotspot_obj):
 
     # plt.close("all")
     # hotspot_obj.plot_local_correlations()
-    # plt.savefig(f"{config.FIGURES_DIR}/hotspot_local_correlations.png")
+    # plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
     # plt.close()
     # print(
-    #     f"  Local correlations plot saved to: {config.FIGURES_DIR}/hotspot_local_correlations.png"
+    #     f"  Local correlations plot saved to: {config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png"
     # )
 
     modules = hotspot_obj.create_modules(

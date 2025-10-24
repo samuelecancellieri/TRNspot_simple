@@ -43,6 +43,15 @@ def create_oracle_object(
     # Create a copy of the AnnData object to avoid modifying the original
     adata_cc = adata.copy()
 
+    # Check if cluster column name contains unsafe characters and replace them
+    if cluster_column_name in adata_cc.obs.columns:
+        # Replace unsafe characters in cluster names
+        adata_cc.obs[cluster_column_name] = (
+            adata_cc.obs[cluster_column_name]
+            .astype(str)
+            .apply(lambda x: x.replace(" ", "_").replace("/", "-"))
+        )
+
     # Load base GRN based on species
     base_GRN = None
     if species == "human":
@@ -60,7 +69,7 @@ def create_oracle_object(
         # use raw counts to build the oracle object
         adata_cc.X = adata_cc.layers[raw_count_layer].copy()
         oracle.import_anndata_as_raw_count(
-            adata=adata,
+            adata=adata_cc,
             cluster_column_name=cluster_column_name,
             embedding_name=embedding_name,
         )
@@ -68,7 +77,7 @@ def create_oracle_object(
         print("Using normalized counts for Oracle object creation.")
         # use normalized counts to build the oracle object
         oracle.import_anndata_as_normalized_count(
-            adata=adata,
+            adata=adata_cc,
             cluster_column_name=cluster_column_name,
             embedding_name=embedding_name,
         )
@@ -121,7 +130,7 @@ def run_PCA(oracle: co.Oracle):
     oracle_cc.perform_PCA()
 
     # Select important PCs
-    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_MEDIUM)
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SMALL)
     ax.plot(np.cumsum(oracle_cc.pca.explained_variance_ratio_)[:200])
     n_comps = np.where(
         np.diff(np.diff(np.cumsum(oracle_cc.pca.explained_variance_ratio_)) > 0.002)
@@ -239,12 +248,12 @@ def run_links(
     links.get_network_score()
     # Plot some stats over the network
     links.plot_degree_distributions(
-        plot_model=True, save=config.FIGURES_DIR + "/grn_degree_distribution/"
+        plot_model=True, save=config.FIGURES_DIR_GRN + "/grn_degree_distribution/"
     )
     links.plot_scores_as_rank(
         cluster=cluster_column_name,
         n_gene=20,
-        save=config.FIGURES_DIR + "/grn_ranks/",
+        save=config.FIGURES_DIR_GRN + "/grn_ranks/",
     )
 
     return links

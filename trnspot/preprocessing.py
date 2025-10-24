@@ -93,7 +93,7 @@ def perform_qc(
     if min_cells is None:
         min_cells = config.QC_MIN_CELLS
     if figsize is None:
-        figsize = config.PLOT_FIGSIZE_LARGE
+        figsize = config.PLOT_FIGSIZE_MEDIUM
 
     # Make a copy to avoid modifying the original
     adata_cc = adata.copy()
@@ -120,27 +120,49 @@ def perform_qc(
         inplace=True,
     )
 
-    # Set figure parameters
-    sc.settings.figdir = config.FIGURES_DIR_QC
+    # Create violin plot for pre-filtering metrics
+    fig, axes = plt.subplots(1, 3, figsize=config.PLOT_FIGSIZE_LARGE)
 
-    # violin of pre-filtering metrics
-    sc.pl.violin(
-        adata_cc,
-        ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-        jitter=0.4,
-        multi_panel=True,
-        save=f"_pre_filter_{save_plots}" if save_plots else None,
-        show=None,
+    sns.violinplot(data=adata_cc.obs, y="n_genes_by_counts", ax=axes[0], inner="box")
+    axes[0].set_ylabel("Number of genes")
+    axes[0].set_title("Genes per cell")
+
+    sns.violinplot(data=adata_cc.obs, y="total_counts", ax=axes[1], inner="box")
+    axes[1].set_ylabel("Total counts")
+    axes[1].set_title("Total counts per cell")
+
+    sns.violinplot(data=adata_cc.obs, y="pct_counts_mt", ax=axes[2], inner="box")
+    axes[2].set_ylabel("% Mitochondrial counts")
+    axes[2].set_title("Mitochondrial percentage")
+
+    if save_plots:
+        fig.savefig(
+            f"{config.FIGURES_DIR_QC}/violin_pre_filter_{save_plots}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+
+    # Create scatter plot for pre-filtering metrics
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_MEDIUM)
+    scatter = ax.scatter(
+        adata_cc.obs["total_counts"],
+        adata_cc.obs["n_genes_by_counts"],
+        c=adata_cc.obs["pct_counts_mt"],
+        cmap=config.PLOT_COLOR_PALETTE,
+        alpha=0.7,
+        s=5,
     )
-    # scatter of pre-filtering metrics
-    sc.pl.scatter(
-        adata_cc,
-        x="total_counts",
-        y="n_genes_by_counts",
-        color="pct_counts_mt",
-        save=f"_pre_filter_{save_plots}" if save_plots else None,
-        show=None,
-    )
+    ax.set_xlabel("Total counts")
+    ax.set_ylabel("Number of genes")
+    ax.set_title("Genes vs Total Counts colored by % Mitochondrial")
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label("% Mitochondrial counts")
+    if save_plots:
+        fig.savefig(
+            f"{config.FIGURES_DIR_QC}/scatter_pre_filter_{save_plots}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
 
     # Apply filtering
     print("\nApplying filters...")
@@ -177,24 +199,50 @@ def perform_qc(
     )
     print(f"  - Final shape: {n_cells_filtered} cells × {n_genes_filtered} genes")
 
-    # violin of post-filtering metrics
-    sc.pl.violin(
-        adata_cc,
-        ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-        jitter=0.4,
-        multi_panel=True,
-        save=f"_post_filter_{save_plots}" if save_plots else None,
-        show=None,
-    )
+    # Create seaborn violin plot for post-filtering metrics
+    fig, axes = plt.subplots(1, 3, figsize=config.PLOT_FIGSIZE_LARGE)
+
+    sns.violinplot(data=adata_cc.obs, y="n_genes_by_counts", ax=axes[0], inner="box")
+    axes[0].set_ylabel("Number of genes")
+    axes[0].set_title("Genes per cell")
+
+    sns.violinplot(data=adata_cc.obs, y="total_counts", ax=axes[1], inner="box")
+    axes[1].set_ylabel("Total counts")
+    axes[1].set_title("Total counts per cell")
+
+    sns.violinplot(data=adata_cc.obs, y="pct_counts_mt", ax=axes[2], inner="box")
+    axes[2].set_ylabel("% Mitochondrial counts")
+    axes[2].set_title("Mitochondrial percentage")
+
+    if save_plots:
+        fig.savefig(
+            f"{config.FIGURES_DIR_QC}/violin_post_filter_{save_plots}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+
     # scatter of post-filtering metrics
-    sc.pl.scatter(
-        adata_cc,
-        x="total_counts",
-        y="n_genes_by_counts",
-        color="pct_counts_mt",
-        save=f"_post_filter_{save_plots}" if save_plots else None,
-        show=None,
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SMALL)
+    scatter = ax.scatter(
+        adata_cc.obs["total_counts"],
+        adata_cc.obs["n_genes_by_counts"],
+        c=adata_cc.obs["pct_counts_mt"],
+        cmap=config.PLOT_COLOR_PALETTE,
+        alpha=0.7,
     )
+    ax.set_xlabel("Total counts")
+    ax.set_ylabel("Number of genes")
+    ax.set_title("Genes vs Total Counts colored by % Mitochondrial")
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label("% Mitochondrial counts")
+    if save_plots:
+        fig.savefig(
+            f"{config.FIGURES_DIR_QC}/scatter_post_filter_{save_plots}.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
+
+    plt.close("all")
 
     return adata_cc
 
