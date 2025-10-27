@@ -22,6 +22,9 @@ import argparse
 import sys
 from datetime import datetime
 import scanpy as sc
+import pickle
+import hashlib
+import json
 
 # Import TRNspot modules
 from trnspot import set_random_seed, set_scanpy_settings, config
@@ -30,6 +33,63 @@ from trnspot.preprocessing import (
     perform_normalization,
     perform_grn_pre_processing,
 )
+
+
+def compute_input_hash(input_path, **params):
+    """Compute hash of input file and parameters for checkpoint verification."""
+    hash_obj = hashlib.md5()
+
+    # Hash input file path
+    if input_path:
+        hash_obj.update(str(input_path).encode())
+        # If file exists, hash its modification time
+        if os.path.exists(input_path):
+            mtime = os.path.getmtime(input_path)
+            hash_obj.update(str(mtime).encode())
+
+    # Hash relevant parameters
+    for key, value in sorted(params.items()):
+        hash_obj.update(f"{key}:{value}".encode())
+
+    return hash_obj.hexdigest()
+
+
+def write_checkpoint(log_dir, step_name, input_hash, **metadata):
+    """Write checkpoint log file for a completed step."""
+    os.makedirs(log_dir, exist_ok=True)
+    checkpoint_file = os.path.join(log_dir, f"{step_name}.checkpoint")
+
+    checkpoint_data = {
+        "step_name": step_name,
+        "input_hash": input_hash,
+        "timestamp": datetime.now().isoformat(),
+        "metadata": metadata,
+    }
+
+    with open(checkpoint_file, "w") as f:
+        json.dump(checkpoint_data, f, indent=2)
+
+
+def check_checkpoint(log_dir, step_name, input_hash):
+    """Check if step has already been completed with same input."""
+    checkpoint_file = os.path.join(log_dir, f"{step_name}.checkpoint")
+
+    if not os.path.exists(checkpoint_file):
+        return False
+
+    try:
+        with open(checkpoint_file, "r") as f:
+            checkpoint_data = json.load(f)
+
+        # Check if input hash matches
+        if checkpoint_data.get("input_hash") == input_hash:
+            print(f"  ⏭ Checkpoint found - skipping {step_name}")
+            print(f"     (completed at {checkpoint_data.get('timestamp')})")
+            return True
+    except Exception as e:
+        print(f"  ⚠ Error reading checkpoint: {e}")
+
+    return False
 
 
 def setup_directories(output_dir, figures_dir, debug=False):
@@ -79,11 +139,31 @@ def load_data(input_path):
     return adata
 
 
-def preprocessing_pipeline(adata, name=None, skip_qc=False):
+def preprocessing_pipeline(adata, name=None, skip_qc=False, log_dir=None):
     """Run preprocessing pipeline."""
     print(f"\n{'='*70}")
     print("STEP 2: Quality Control and Preprocessing")
     print(f"{'='*70}")
+
+    # Check checkpoint for preprocessing
+    step_hash = compute_input_hash(
+        None,
+        n_obs=adata.n_obs,
+        n_vars=adata.n_vars,
+        min_genes=config.QC_MIN_GENES,
+        min_counts=config.QC_MIN_COUNTS,
+        pct_mt_max=config.QC_PCT_MT_MAX,
+        skip_qc=skip_qc,
+    )
+
+    checkpoint_file = os.path.join(config.OUTPUT_DIR, "preprocessed_adata.h5ad")
+    if (
+        log_dir
+        and check_checkpoint(log_dir, "preprocessing", step_hash)
+        and os.path.exists(checkpoint_file)
+    ):
+        print(f"  Loading preprocessed data from: {checkpoint_file}")
+        return sc.read_h5ad(checkpoint_file)
 
     if not skip_qc:
         print("\n[2.1] Performing quality control...")
@@ -102,6 +182,13 @@ def preprocessing_pipeline(adata, name=None, skip_qc=False):
     print("\n[2.2] Normalizing data...")
     adata = perform_normalization(adata)
     print("  ✓ Normalization complete")
+
+    # Save checkpoint
+    if log_dir:
+        adata.write(checkpoint_file)
+        write_checkpoint(
+            log_dir, "preprocessing", step_hash, n_obs=adata.n_obs, n_vars=adata.n_vars
+        )
 
     # Store raw counts for Hotspot
     # if adata.raw is not None:
@@ -138,14 +225,34 @@ def stratification_pipeline(adata, cluster_key_stratification=None):
         return adata_list, adata_stratification_list
     else:
         print("\nNo stratification performed (no valid clustering key provided).")
-        return [adata], []  # Return list with original adata for consistency
+        return [], []  # Return empty lists for compatibility
 
 
-def dimensionality_reduction_clustering(adata, cluster_key="leiden"):
+def dimensionality_reduction_clustering(adata, cluster_key="leiden", log_dir=None):
     """Perform dimensionality reduction and clustering."""
     print(f"\n{'='*70}")
     print("STEP 3: Dimensionality Reduction and Clustering")
     print(f"{'='*70}")
+
+    # Check checkpoint for clustering
+    step_hash = compute_input_hash(
+        None,
+        n_obs=adata.n_obs,
+        n_vars=adata.n_vars,
+        cluster_key=cluster_key,
+        top_genes=config.HVGS_N_TOP_GENES,
+        n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
+        n_pcs=config.NEIGHBORS_N_PCS,
+    )
+
+    checkpoint_file = f"{config.OUTPUT_DIR}/clustered_adata.h5ad"
+    if (
+        log_dir
+        and check_checkpoint(log_dir, "clustering", step_hash)
+        and os.path.exists(checkpoint_file)
+    ):
+        print(f"  Loading clustered data from: {checkpoint_file}")
+        return sc.read_h5ad(checkpoint_file)
 
     # GRN preprocessing (includes HVG, PCA, diffusion map, PAGA)
     print("\n[3.1] Running GRN preprocessing pipeline...")
@@ -172,10 +279,17 @@ def dimensionality_reduction_clustering(adata, cluster_key="leiden"):
         n_clusters = len(adata.obs["leiden"].unique())
         print(f"\n[3.3] Using existing Leiden clustering ({n_clusters} clusters)")
 
-    # Save preprocessed data
-    output_path = f"{config.OUTPUT_DIR}/preprocessed_adata.h5ad"
-    adata.write(output_path)
-    print(f"\n✓ Preprocessed data saved to: {output_path}")
+    # Save checkpoint
+    if log_dir:
+        adata.write(checkpoint_file)
+        write_checkpoint(
+            log_dir,
+            "clustering",
+            step_hash,
+            n_obs=adata.n_obs,
+            n_vars=adata.n_vars,
+            n_clusters=n_clusters,
+        )
 
     return adata
 
@@ -188,6 +302,7 @@ def celloracle_pipeline(
     raw_count_layer="raw_counts",
     TG_to_TF_dictionary=None,
     skip_celloracle=False,
+    log_dir=None,
 ):
     """Run CellOracle GRN inference pipeline."""
     print(f"\n{'='*70}")
@@ -198,12 +313,39 @@ def celloracle_pipeline(
         print("⊘ Skipping CellOracle analysis (--skip-celloracle)")
         return None
 
+    # Check checkpoint for CellOracle
+    step_hash = compute_input_hash(
+        None,
+        n_obs=adata.n_obs,
+        cluster_key=cluster_key,
+        species=species,
+        embedding_name=embedding_name,
+    )
+
+    oracle_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.oracle"
+    links_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.links"
+
+    if log_dir and check_checkpoint(log_dir, "celloracle", step_hash):
+        if os.path.exists(oracle_file) and os.path.exists(links_file):
+            try:
+                from trnspot.celloracle_processing import load_celloracle_results
+
+                print(f"  Loading CellOracle results from checkpoint...")
+                oracle, links = load_celloracle_results(
+                    oracle_path=oracle_file, links_path=links_file
+                )
+                return oracle, links
+            except Exception as e:
+                print(f"  ⚠ Error loading checkpoint: {e}")
+                print(f"  Re-running CellOracle analysis...")
+
     try:
         from trnspot.celloracle_processing import (
             create_oracle_object,
             run_PCA,
             run_KNN,
             run_links,
+            save_celloracle_results,
         )
 
         print("\n[4.1] Creating Oracle object...")
@@ -233,15 +375,19 @@ def celloracle_pipeline(
         )
         print("  ✓ GRN inference complete")
 
-        # Save Oracle object
-        oracle_path = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.oracle"
-        oracle.to_hdf5(oracle_path)
-        print(f"\n✓ Oracle object saved to: {oracle_path}")
+        print("\n[4.5] Saving CellOracle results...")
+        save_celloracle_results(oracle, links)
+        print("  ✓ CellOracle results saved")
 
-        # Save links
-        links_path = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.links"
-        links.to_hdf5(links_path)
-        print(f"✓ GRN links saved to: {links_path}")
+        # Save checkpoint
+        if log_dir:
+            write_checkpoint(
+                log_dir,
+                "celloracle",
+                step_hash,
+                n_obs=adata.n_obs,
+                cluster_key=cluster_key,
+            )
 
         return oracle, links
 
@@ -256,7 +402,11 @@ def celloracle_pipeline(
 
 
 def hotspot_pipeline(
-    adata, layer_key="raw_counts", embedding_key="X_umap", skip_hotspot=False
+    adata,
+    layer_key="raw_counts",
+    embedding_key="X_umap",
+    skip_hotspot=False,
+    log_dir=None,
 ):
     """Run Hotspot gene module identification pipeline."""
     print(f"\n{'='*70}")
@@ -266,6 +416,26 @@ def hotspot_pipeline(
     if skip_hotspot:
         print("⊘ Skipping Hotspot analysis (--skip-hotspot)")
         return None
+
+    # Check checkpoint for Hotspot
+    step_hash = compute_input_hash(
+        None,
+        n_obs=adata.n_obs,
+        top_genes=config.HOTSPOT_TOP_GENES,
+        embedding_key=embedding_key,
+        fdr_threshold=config.HOTSPOT_FDR_THRESHOLD,
+    )
+
+    hotspot_file = f"{config.OUTPUT_DIR}/hotspot/hotspot_object.pkl"
+    if (
+        log_dir
+        and check_checkpoint(log_dir, "hotspot", step_hash)
+        and os.path.exists(hotspot_file)
+    ):
+        print(f"  Loading Hotspot results from checkpoint...")
+        with open(hotspot_file, "rb") as f:
+            hotspot_obj = pickle.load(f)
+        return hotspot_obj
 
     try:
         from trnspot.hotspot_processing import (
@@ -303,19 +473,15 @@ def hotspot_pipeline(
             n_modules = len(hotspot_obj.modules.unique())
             print(f"    Gene modules identified: {n_modules}")
 
-        # Save additional results
-        results_path = f"{config.OUTPUT_DIR}/hotspot/autocorrelation_results.csv"
-        autocorr_results.to_csv(results_path)
-        print(f"\n✓ Autocorrelation results saved to: {results_path}")
-
-        significant_path = f"{config.OUTPUT_DIR}/hotspot/significant_genes.csv"
-        significant_genes.to_csv(significant_path)
-        print(f"✓ Significant genes saved to: {significant_path}")
-
-        if hasattr(hotspot_obj, "modules"):
-            modules_path = f"{config.OUTPUT_DIR}/hotspot/gene_modules.csv"
-            hotspot_obj.modules.to_csv(modules_path)
-            print(f"✓ Gene modules saved to: {modules_path}")
+        # Save checkpoint
+        if log_dir:
+            write_checkpoint(
+                log_dir,
+                "hotspot",
+                step_hash,
+                n_genes=len(autocorr_results),
+                n_significant=len(significant_genes),
+            )
 
         return hotspot_obj
 
@@ -394,14 +560,14 @@ def generate_summary(adata, celloracle_result, hotspot_result, start_time, outpu
     summary.append(f"Figures directory: {config.FIGURES_DIR}/")
     summary.append(f"Results directory: {output_dir}/")
 
-    summary.append(f"\n{'='*70}")
-    summary.append("Next Steps")
-    summary.append("=" * 70)
-    summary.append("1. Explore cell clusters and marker genes")
-    summary.append("2. Analyze gene regulatory networks (CellOracle results)")
-    summary.append("3. Examine gene modules and their functions (Hotspot results)")
-    summary.append("4. Perform downstream analysis (GO enrichment, pathway analysis)")
-    summary.append("5. Generate publication-quality visualizations")
+    # summary.append(f"\n{'='*70}")
+    # summary.append("Next Steps")
+    # summary.append("=" * 70)
+    # summary.append("1. Explore cell clusters and marker genes")
+    # summary.append("2. Analyze gene regulatory networks (CellOracle results)")
+    # summary.append("3. Examine gene modules and their functions (Hotspot results)")
+    # summary.append("4. Perform downstream analysis (GO enrichment, pathway analysis)")
+    # summary.append("5. Generate publication-quality visualizations")
 
     summary_text = "\n".join(summary)
     print("\n" + summary_text)
@@ -413,6 +579,46 @@ def generate_summary(adata, celloracle_result, hotspot_result, start_time, outpu
     print(f"\n✓ Summary saved to: {summary_path}")
 
     return summary_text
+
+
+def track_files(output_dir):
+    """Track output files generated during the pipeline."""
+    tracked_files = []
+    for root, dirs, files in os.walk(output_dir):
+        for file in files:
+            tracked_files.append(os.path.join(root, file))
+
+    tracked_files_path = os.path.join(output_dir, "tracked_files.txt")
+    with open(tracked_files_path, "w") as f:
+        for file in tracked_files:
+            f.write(f"{file}\n")
+    print(f"\n✓ Tracked output files saved to: {tracked_files_path}")
+
+    return tracked_files
+
+
+def grn_deep_analysis_pipeline(grn_score_path):
+    """Run GRN deep analysis using tracked output files."""
+    from trnspot.grn_deep_analysis import (
+        process_single_score_file,
+        plot_heatmap_scores,
+        plot_compare_cluster_scores,
+        plot_difference_cluster_scores,
+    )
+
+    print(f"\n{'='*70}")
+    print("STEP 7: GRN Deep Analysis")
+    print(f"{'='*70}")
+
+    os.makedirs(f"{config.OUTPUT_DIR}/grn_deep_analysis", exist_ok=True)
+    os.makedirs(f"{config.FIGURES_DIR_GRN}/grn_deep_analysis", exist_ok=True)
+
+    score_df = process_single_score_file(grn_score_path)
+    print("  ✓ Processed GRN score file")
+    plot_compare_cluster_scores(score_df)
+    print("  ✓ Generated cluster comparison plots")
+    plot_difference_cluster_scores(score_df)
+    print("  ✓ Generated cluster difference plots")
 
 
 def main():
@@ -606,23 +812,27 @@ Examples:
 
     try:
         # Run pipeline
+        log_dir = os.path.join(args.output, "logs")
+
         adata = load_data(args.input)
-        adata = preprocessing_pipeline(adata, args.name, skip_qc=args.skip_qc)
+        adata_preprocessed = preprocessing_pipeline(
+            adata, args.name, skip_qc=args.skip_qc, log_dir=log_dir
+        )
         adata_list, adata_stratification_list = stratification_pipeline(
-            adata, args.cluster_key_stratification
+            adata_preprocessed, args.cluster_key_stratification
         )
 
-        # Process each stratified adata
-        for idx, (adata_l, adata_stratification) in enumerate(
-            zip(adata_list, adata_stratification_list)
-        ):
-            # Create stratification-specific output directory
-            if adata_stratification_list:  # If stratification was performed
+        if args.cluster_key_stratification:
+            # Process each stratified adata
+            for idx, (adata_l, adata_stratification) in enumerate(
+                zip(adata_list, adata_stratification_list)
+            ):
                 # Create stratified folder INSIDE the main output directory
                 stratified_output_dir = os.path.join(
                     args.output, str(adata_stratification)
                 )
                 stratified_figures_dir = os.path.join(stratified_output_dir, "figures")
+                stratified_log_dir = os.path.join(stratified_output_dir, "logs")
 
                 print(f"\n{'='*70}")
                 print(f"Processing stratified dataset: {adata_stratification}")
@@ -640,12 +850,48 @@ Examples:
                     FIGURES_DIR_GRN=os.path.join(stratified_figures_dir, "grn"),
                     FIGURES_DIR_HOTSPOT=os.path.join(stratified_figures_dir, "hotspot"),
                 )
-            else:  # No stratification, use base directories
-                stratified_output_dir = args.output
 
-            # Process each stratified adata
+                # Process each stratified adata
+                adata_l = dimensionality_reduction_clustering(
+                    adata_l, cluster_key=args.cluster_key, log_dir=stratified_log_dir
+                )
+                celloracle_result = celloracle_pipeline(
+                    adata_l,
+                    cluster_key=args.cluster_key,
+                    species=args.species,
+                    raw_count_layer=args.raw_count_layer,
+                    embedding_name=args.embedding_grn,
+                    TG_to_TF_dictionary=args.tf_dictionary,
+                    skip_celloracle=args.skip_celloracle,
+                    log_dir=stratified_log_dir,
+                )
+                hotspot_result = hotspot_pipeline(
+                    adata_l,
+                    layer_key=args.raw_count_layer,
+                    embedding_key=args.embedding_hotspot,
+                    skip_hotspot=args.skip_hotspot,
+                    log_dir=stratified_log_dir,
+                )
+
+                # Generate summary
+                generate_summary(
+                    adata_l,
+                    celloracle_result,
+                    hotspot_result,
+                    start_time,
+                    stratified_output_dir,
+                )
+
+                # Run GRN deep analysis on the tracked files
+                grn_deep_analysis_pipeline(
+                    os.path.join(
+                        stratified_output_dir, "celloracle", "grn_merged_scores.csv"
+                    )
+                )
+        else:
+            # No stratification; process the original adata
             adata_l = dimensionality_reduction_clustering(
-                adata_l, cluster_key=args.cluster_key
+                adata_preprocessed, cluster_key=args.cluster_key, log_dir=log_dir
             )
             celloracle_result = celloracle_pipeline(
                 adata_l,
@@ -655,12 +901,14 @@ Examples:
                 embedding_name=args.embedding_grn,
                 TG_to_TF_dictionary=args.tf_dictionary,
                 skip_celloracle=args.skip_celloracle,
+                log_dir=log_dir,
             )
             hotspot_result = hotspot_pipeline(
                 adata_l,
                 layer_key=args.raw_count_layer,
                 embedding_key=args.embedding_hotspot,
                 skip_hotspot=args.skip_hotspot,
+                log_dir=log_dir,
             )
 
             # Generate summary
@@ -669,7 +917,7 @@ Examples:
                 celloracle_result,
                 hotspot_result,
                 start_time,
-                stratified_output_dir,
+                args.output,
             )
 
         # Print final summary for all stratifications
@@ -684,7 +932,23 @@ Examples:
         else:
             print(f"\nResults saved to: {args.output}/")
 
-        print()
+        # Track output files to keep record of all the files generated by the pipeline
+        track_files(args.output)
+
+        # Reset config back to main output directory
+        config.update_config(
+            OUTPUT_DIR=args.output,
+            FIGURES_DIR=os.path.join(args.output, "figures"),
+            FIGURES_DIR_QC=os.path.join(args.output, "figures", "qc"),
+            FIGURES_DIR_GRN=os.path.join(args.output, "figures", "grn"),
+            FIGURES_DIR_HOTSPOT=os.path.join(args.output, "figures", "hotspot"),
+        )
+
+        from trnspot.grn_deep_analysis import (
+            merge_scores,
+        )
+
+        merge_scores(os.path.join(args.output, "tracked_files.txt"))
 
         return 0
 

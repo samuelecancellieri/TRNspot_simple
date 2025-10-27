@@ -14,6 +14,52 @@ import pickle
 from . import config
 
 
+def save_hotspot_results(
+    hotspot_obj: hs.Hotspot,
+):
+    """
+    Save Hotspot analysis results to specified output directory.
+
+    Parameters:
+        hotspot_obj (hs.Hotspot): An instance of the Hotspot class containing analysis results.
+        output_dir (str): Directory where results will be saved.
+
+    """
+    # Get results summary
+    autocorr_results = hotspot_obj.results
+
+    significant_genes = autocorr_results[
+        autocorr_results.FDR < config.HOTSPOT_FDR_THRESHOLD
+    ]
+
+    module_scores = hotspot_obj.module_scores
+    module_scores.index.name = "cell_id"
+
+    gene_modules = hotspot_obj.modules
+
+    # Save additional results
+    results_path = f"{config.OUTPUT_DIR}/hotspot/autocorrelation_results.csv"
+    autocorr_results.to_csv(results_path)
+    print(f"\n✓ Autocorrelation results saved to: {results_path}")
+
+    significant_path = f"{config.OUTPUT_DIR}/hotspot/significant_genes.csv"
+    significant_genes.to_csv(significant_path)
+    print(f"✓ Significant genes saved to: {significant_path}")
+
+    module_scores_path = f"{config.OUTPUT_DIR}/hotspot/hotspot_module_scores.csv"
+    module_scores.to_csv(module_scores_path)
+    print(f"✓ Module scores saved to: {module_scores_path}")
+
+    modules_path = f"{config.OUTPUT_DIR}/hotspot/gene_modules.csv"
+    gene_modules.to_csv(modules_path)
+    print(f"✓ Gene modules saved to: {modules_path}")
+
+    hotspot_object_path = f"{config.OUTPUT_DIR}/hotspot/hotspot_object.pkl"
+    with open(hotspot_object_path, "wb") as f:
+        pickle.dump(hotspot_obj, f)
+    print(f"✓ Hotspot object saved to: {hotspot_object_path}")
+
+
 def create_hotspot_object(
     adata: AnnData,
     top_genes: int = config.HOTSPOT_TOP_GENES,
@@ -99,18 +145,6 @@ def run_hotspot_analysis(hotspot_obj):
         f"  Identified {len(hs_genes)} significant genes (FDR < {config.HOTSPOT_FDR_THRESHOLD})"
     )
 
-    # Create output directory if it doesn't exist
-    # os.makedirs(config.FIGURES_DIR, exist_ok=True)
-    # os.makedirs(f"{config.OUTPUT_DIR}/hotspot", exist_ok=True)
-
-    # plt.close("all")
-    # hotspot_obj.plot_local_correlations()
-    # plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
-    # plt.close()
-    # print(
-    #     f"  Local correlations plot saved to: {config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png"
-    # )
-
     modules = hotspot_obj.create_modules(
         min_gene_threshold=config.HOTSPOT_MIN_GENES_PER_MODULE,
         core_only=config.HOTSPOT_CORE_ONLY,
@@ -121,21 +155,11 @@ def run_hotspot_analysis(hotspot_obj):
     module_scores = hotspot_obj.calculate_module_scores()
     print("  Module scores calculated")
 
-    module_scores.index.name = "cell_id"
-    module_scores.to_csv(f"{config.OUTPUT_DIR}/hotspot/hotspot_module_scores.csv")
+    plt.close("all")
+    hotspot_obj.plot_local_correlations()
+    plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
+    plt.close()
 
-    hotspot_obj.adata.obs = hotspot_obj.adata.obs.merge(
-        module_scores, left_index=True, right_index=True
-    )
-
-    hotspot_obj.adata.var = hotspot_obj.adata.var.merge(
-        hs_results, left_index=True, right_index=True, how="left"
-    )
-
-    with open(f"{config.OUTPUT_DIR}/hotspot/hotspot_result_score.pkl", "wb") as f:
-        pickle.dump(hotspot_obj, f)
-        print(
-            f"  hotspot object saved to: {config.OUTPUT_DIR}/hotspot/hotspot_object.pkl"
-        )
+    save_hotspot_results(hotspot_obj)
 
     return hotspot_obj

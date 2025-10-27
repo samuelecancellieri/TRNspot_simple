@@ -16,6 +16,68 @@ import pickle
 from . import config
 
 
+def load_celloracle_results(
+    oracle_path: str,
+    links_path: str,
+) -> Tuple[co.Oracle, co.Links]:
+    """
+    Load CellOracle analysis results from specified files.
+
+    Parameters:
+        oracle_path (str): Path to the Oracle object file.
+        links_path (str): Path to the Links object file.
+
+    Returns:
+        Tuple[co.Oracle, co.Links]: Loaded Oracle and Links objects.
+
+    """
+
+    # Load Oracle object
+    oracle = co.load_hdf5(oracle_path)
+    print(f"\n✓ Oracle object loaded from: {oracle_path}")
+
+    # Load Links object
+    links = co.load_hdf5(links_path)
+    print(f"✓ GRN links loaded from: {links_path}")
+
+    return oracle, links
+
+
+def save_celloracle_results(
+    oracle: co.Oracle,
+    links: co.Links,
+):
+    """
+    Save CellOracle analysis results to specified output directory.
+
+    Parameters:
+        oracle (co.Oracle): An instance of the Oracle class containing analysis results.
+        links (co.Links): An instance of the Links class containing GRN links.
+
+    """
+
+    # Save Oracle object
+    oracle_path = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.oracle"
+    oracle.to_hdf5(oracle_path)
+    print(f"\n✓ Oracle object saved to: {oracle_path}")
+
+    # Save links
+    links_path = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.links"
+    links.to_hdf5(links_path)
+    print(f"✓ GRN links saved to: {links_path}")
+
+    merged_score = links.merged_score
+    merged_score_path = f"{config.OUTPUT_DIR}/celloracle/grn_merged_scores.csv"
+    merged_score.to_csv(merged_score_path)
+    print(f"✓ Merged scores saved to: {merged_score_path}")
+
+    links_filtered = links.filtered_links
+    links_filtered_path = f"{config.OUTPUT_DIR}/celloracle/grn_filtered_links.pkl"
+    with open(links_filtered_path, "wb") as f:
+        pickle.dump(links_filtered, f)
+    print(f"✓ Filtered links saved to: {links_filtered_path}")
+
+
 # Move content from grn_celloracle_processing.py here
 def create_oracle_object(
     adata: AnnData,
@@ -50,6 +112,7 @@ def create_oracle_object(
             adata_cc.obs[cluster_column_name]
             .astype(str)
             .apply(lambda x: x.replace(" ", "_").replace("/", "-"))
+            .astype("category")
         )
 
     # Load base GRN based on species
@@ -252,7 +315,7 @@ def run_links(
     )
     links.plot_scores_as_rank(
         cluster=cluster_column_name,
-        n_gene=20,
+        n_gene=10,
         save=config.FIGURES_DIR_GRN + "/grn_ranks/",
     )
 

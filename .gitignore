@@ -93,3 +93,4 @@ data/
 *.csv
 *.oracle
 *.links
+*.checkpoint

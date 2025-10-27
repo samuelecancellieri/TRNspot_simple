@@ -222,7 +222,7 @@ def perform_qc(
         )
 
     # scatter of post-filtering metrics
-    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SMALL)
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_MEDIUM)
     scatter = ax.scatter(
         adata_cc.obs["total_counts"],
         adata_cc.obs["n_genes_by_counts"],

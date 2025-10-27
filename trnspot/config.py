@@ -58,10 +58,10 @@ QC_MIN_CELLS = 10
 # Plotting Configuration
 # ============================================================================
 
-PLOT_DPI = 150
-"""Default DPI for saved figures"""
+PLOT_DPI = 200
+"""Default DPI for plot figures"""
 
-SAVE_DPI = 300
+SAVE_DPI = 600
 """DPI for saving figures"""
 
 PLOT_FORMAT = "png"
@@ -219,6 +219,12 @@ LOG_LEVEL = "INFO"
 
 VERBOSE = True
 """Whether to print verbose output"""
+
+LOG_PATH = os.path.join(OUTPUT_DIR, "logs")
+"""Directory for saving log files"""
+
+LOG_FILE = os.path.join(LOG_PATH, "trnspot_log.txt")
+"""Path to the main log file"""
 
 
 # ============================================================================
