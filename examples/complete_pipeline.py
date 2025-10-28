@@ -589,6 +589,8 @@ def track_files(output_dir):
             tracked_files.append(os.path.join(root, file))
 
     tracked_files_path = os.path.join(output_dir, "tracked_files.txt")
+    if os.path.exists(tracked_files_path):
+        os.remove(tracked_files_path)
     with open(tracked_files_path, "w") as f:
         for file in tracked_files:
             f.write(f"{file}\n")
@@ -601,7 +603,7 @@ def grn_deep_analysis_pipeline(grn_score_path):
     """Run GRN deep analysis using tracked output files."""
     from trnspot.grn_deep_analysis import (
         process_single_score_file,
-        plot_heatmap_scores,
+        plot_scatter_scores,
         plot_compare_cluster_scores,
         plot_difference_cluster_scores,
     )
@@ -619,6 +621,8 @@ def grn_deep_analysis_pipeline(grn_score_path):
     print("  ✓ Generated cluster comparison plots")
     plot_difference_cluster_scores(score_df)
     print("  ✓ Generated cluster difference plots")
+    plot_scatter_scores(score_df)
+    print("  ✓ Generated scatter plots")
 
 
 def main():
@@ -920,6 +924,13 @@ Examples:
                 args.output,
             )
 
+            # Run GRN deep analysis on the tracked files
+            grn_deep_analysis_pipeline(
+                os.path.join(
+                    stratified_output_dir, "celloracle", "grn_merged_scores.csv"
+                )
+            )
+
         # Print final summary for all stratifications
         print(f"\n{'='*70}")
         print("Pipeline completed successfully! ✓")
@@ -944,11 +955,13 @@ Examples:
             FIGURES_DIR_HOTSPOT=os.path.join(args.output, "figures", "hotspot"),
         )
 
-        from trnspot.grn_deep_analysis import (
-            merge_scores,
-        )
+        from trnspot.grn_deep_analysis import merge_scores, plot_heatmap_scores
 
-        merge_scores(os.path.join(args.output, "tracked_files.txt"))
+        total_merged_scores = merge_scores(
+            os.path.join(args.output, "tracked_files.txt")
+        )
+        plot_heatmap_scores(total_merged_scores)
+        print("  ✓ Generated overall GRN deep analysis heatmap")
 
         return 0
 

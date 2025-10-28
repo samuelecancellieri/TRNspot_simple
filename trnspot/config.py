@@ -70,6 +70,9 @@ PLOT_FORMAT = "png"
 PLOT_FIGSIZE_SQUARED = (6, 6)
 """Square figure size"""
 
+PLOT_FIGSIZE_SQUARED_LARGE = (10, 10)
+"""Large Square figure size"""
+
 PLOT_FIGSIZE_SMALL = (6, 4)
 """Small figure size"""
 

@@ -11,11 +11,83 @@ import pandas as pd
 import marsilea as ma
 from . import config
 from itertools import combinations
+import numpy as np
+
+
+def plot_heatmap_single_score(
+    heatmap_data: pd.DataFrame,
+    cluster1: str,
+    cluster2: str,
+    score: str,
+    top_n_genes: int = 5,
+):
+    """
+    Plot a heatmap for a single score and stratification.
+
+    Args:
+        scores_df (pd.DataFrame): DataFrame containing scores to plot.
+        strat (str): Stratification to filter the DataFrame.
+        score (str): Score column to plot.
+        top_n_genes (int): Number of top genes to display.
+
+    Returns:
+        None
+    """
+
+    heatmap_data_melt_score = heatmap_data.query("score == @score").copy()
+
+    heatmap_data_melt_score_transformed = heatmap_data_melt_score.copy()
+    heatmap_data_melt_score_transformed.loc[
+        heatmap_data_melt_score_transformed["cluster"] == cluster2, "value"
+    ] *= -1
+
+    heatmap_data_melt_score_final = (
+        heatmap_data_melt_score_transformed.groupby(
+            ["gene", "stratification", "score"]
+        )["value"]
+        .sum()
+        .reset_index()
+    )
+
+    # Create pivot table: genes x stratifications with the aggregated (signed) eigenvector values
+    pivot_df = heatmap_data_melt_score_final.pivot(
+        index="gene", columns="stratification", values="value"
+    ).fillna(0)
+
+    # Select top genes by absolute aggregated signal across stratifications
+    top_genes_idx = pivot_df.abs().sum(axis=1).nlargest(top_n_genes).index
+    pivot_top = pivot_df.loc[top_genes_idx]
+
+    # Plot heatmap
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SQUARED_LARGE)
+    sns.heatmap(
+        pivot_top,
+        annot=False,
+        fmt=".2f",
+        cmap="RdBu_r",
+        center=0,
+        cbar_kws={"label": f"{score} (difference)"},
+        ax=ax,
+    )
+    # ax.set_title(f"Difference in {score} across stratifications")
+    ax.set_ylabel("Gene")
+    ax.set_xlabel("Stratification")
+    plt.xticks(rotation=90)
+
+    # Save and close
+    fig.savefig(
+        f"{config.FIGURES_DIR_GRN}/grn_heatmap_{score}_difference_top{top_n_genes}_{cluster1}_vs_{cluster2}.png",
+        dpi=config.SAVE_DPI,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    return 0
 
 
 def plot_heatmap_scores(
     scores_df: pd.DataFrame,
-    top_n_genes: int = 5,
+    top_n_genes: int = 20,
     scores: list[str] = [
         "degree_all",
         "degree_centrality_all",
@@ -43,44 +115,171 @@ def plot_heatmap_scores(
         matplotlib.figure.Figure: The generated heatmap figure.
     """
 
-    # Select top N genes based on score
-    for score in scores:
-        top5_by_cluster = (
-            scores_df.sort_values(
-                by=["stratification", "cluster", score], ascending=[True, True, False]
+    stratifications = scores_df["stratification"].unique()
+    clusters = scores_df["cluster"].unique()
+    cluster_combinations = combinations(clusters, 2)
+
+    heatmap_data_melt = scores_df.melt(
+        id_vars=["gene", "cluster", "stratification"],
+        value_vars=scores,
+        var_name="score",
+        value_name="value",
+    )
+
+    for cluster1, cluster2 in cluster_combinations:
+        for score in scores:
+            plot_heatmap_single_score(
+                heatmap_data=heatmap_data_melt[
+                    (heatmap_data_melt["cluster"].isin([cluster1, cluster2]))
+                    & (heatmap_data_melt["score"] == score)
+                ],
+                score=score,
+                cluster1=cluster1,
+                cluster2=cluster2,
+                top_n_genes=top_n_genes,
             )
-            .groupby(by=["stratification", "cluster"])
-            .head(top_n_genes)["gene"]
-            .unique()
-            .tolist()
-        )
 
-        # Pivot the DataFrame for heatmap
-        heatmap_data = scores_df[scores_df["gene"].isin(top5_by_cluster)]
-        heatmap_data = heatmap_data.pivot_table(
-            index="gene", columns="stratification", values=score, fill_value=0
-        )
+    return 0
 
-        # Plot heatmap
-        fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_MEDIUM)
-        sns.heatmap(
-            heatmap_data,
-            annot=True,
-            fmt=".2f",
-            cmap="viridis",
-            cbar_kws={"label": "Score"},
-            ax=ax,
-        )
-        ax.set_title(f"Top {top_n_genes} Gene Scores Heatmap - {score}")
-        ax.set_ylabel("Gene")
-        ax.set_xlabel("Stratification")
 
-        fig.savefig(
-            f"{config.FIGURES_DIR_GRN}/grn_heatmap_top{top_n_genes}_{score}.png",
-            dpi=config.SAVE_DPI,
-            bbox_inches="tight",
-        )
-        plt.close(fig)
+def plot_score_comparison_2D(
+    score_df: pd.DataFrame,
+    value,
+    cluster1,
+    cluster2,
+    percentile=99,
+    dot_color="black",
+    edge_color=None,
+    annot_shifts=None,
+    save=None,
+    fillna_with_zero=True,
+    plt_show=True,
+):
+    """
+    Make a scatter plot that shows the relationship of a specific network score in two groups.
+
+    Args:
+        links (Links object): See network_analisis.Links class for detail.
+        value (srt): The network score to be shown.
+        cluster1 (str): Cluster nome to analyze. Network scores in the cluste1 are shown as x-axis.
+        cluster2 (str): Cluster nome to analyze. Network scores in the cluste2 are shown as y-axis.
+        percentile (float): Genes with a network score above the percentile will be shown with annotation. Default is 99.
+        annot_shifts ((float, float)): Shift x and y cordinate for annotations.
+        save (str): Folder path to save plots. If the folde does not exist in the path, the function create the folder.
+            If None plots will not be saved. Default is None.
+    """
+
+    # Prepare data for plotting
+    res = score_df[score_df.cluster.isin([cluster1, cluster2])][[value, "cluster"]]
+    res = res.reset_index(drop=False)
+    piv = pd.pivot_table(res, values=value, columns="cluster", index="gene")
+    if fillna_with_zero:
+        piv = piv.fillna(0)
+    else:
+        piv = piv.fillna(piv.mean(axis=0))
+    piv["sum"] = piv[cluster1] + piv[cluster2]
+
+    goi1 = piv[piv[cluster1] > np.percentile(piv[cluster1].values, percentile)].index
+    goi2 = piv[piv[cluster2] > np.percentile(piv[cluster2].values, percentile)].index
+
+    gois = np.union1d(goi1, goi2)
+
+    x, y = piv[cluster1], piv[cluster2]
+    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SQUARED)
+    sns.scatterplot(
+        x=x, y=y, markers="o", s=50, edgecolor=edge_color, color=dot_color, ax=ax
+    )
+    ax.set_title(f"{value}")
+    # Add diagonal line
+    lims = [
+        np.min([ax.get_xlim(), ax.get_ylim()]),  # min of both axes
+        np.max([ax.get_xlim(), ax.get_ylim()]),  # max of both axes
+    ]
+    ax.plot(lims, lims, "r--", alpha=0.75, zorder=0, linewidth=1)
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+
+    # if annot_shifts is None:
+    #     x_shift, y_shift = (x.max() - x.min()) * 0.03, (y.max() - y.min()) * 0.03
+    # else:
+    #     x_shift, y_shift = annot_shifts
+
+    texts = list()
+    for goi in gois:
+        x, y = piv.loc[goi, cluster1], piv.loc[goi, cluster2]
+        texts.append(ax.text(x, y, goi))
+
+    adjust_text(
+        texts=texts,
+        arrowprops=dict(arrowstyle="->", color="r", lw=0.5),
+        ax=ax,
+        time_lim=2,
+    )
+
+    if plt_show:
+        plt.show()
+        return gois, fig, texts
+    else:
+        return gois, fig, texts
+
+
+def plot_scatter_scores(
+    score_df: pd.DataFrame,
+    scores_list: list[str] = [
+        "degree_all",
+        "degree_centrality_all",
+        "degree_in",
+        "degree_centrality_in",
+        "degree_out",
+        "degree_centrality_out",
+        "betweenness_centrality",
+        "eigenvector_centrality",
+    ],
+):
+    """
+    Plot a scatter plot comparing scores between two stratifications for a given cluster.
+
+    Args:
+        scores_df (pd.DataFrame): DataFrame containing scores.
+        cluster (str): The cluster to analyze.
+        score (str): The score column to compare.
+        stratifications (list[str]): List of two stratifications to compare.
+    Returns:
+        matplotlib.figure.Figure: The generated plot figure.
+    """
+    clusters = sorted(set(score_df["cluster"].tolist()))
+    cluster_combinations = combinations(clusters, 2)
+
+    for cluster1, cluster2 in cluster_combinations:
+        for score in scores_list:
+            # print(f"Generating scatter plot for {score} - {cluster1} vs {cluster2}")
+            genes_t, plot_t, texts_t = plot_score_comparison_2D(
+                score_df=score_df,
+                value=score,
+                cluster1=cluster1,
+                cluster2=cluster2,
+                percentile=99,
+                annot_shifts=None,
+                edge_color="black",
+                dot_color="#0096FF",  # Use a specific color for the dots
+                save=None,
+                fillna_with_zero=True,
+                plt_show=False,
+            )
+
+            cluster1_clean = cluster1.replace(" ", "_").strip()
+            cluster2_clean = cluster2.replace(" ", "_").strip()
+            plot_t.axes[0].grid(False)
+            sns.despine(ax=plot_t.axes[0])
+
+            plot_t.savefig(
+                f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/grn_scatter_{score}_{cluster1_clean}_vs_{cluster2_clean}.png",
+                dpi=config.SAVE_DPI,
+                bbox_inches="tight",
+            )
+            plt.close(plot_t)
+
+    return 0
 
 
 def plot_difference_cluster_scores(
@@ -351,15 +550,17 @@ def merge_scores(tracked_file: str) -> pd.DataFrame:
 
     merged_scores = list()
     for file in file_list:
-
         if file.count("grn_merged_scores.csv") == 0:
             continue
         print(f"Processing file: {file}")
         score_tmp_df = pd.read_csv(file)
         score_tmp_df.rename(columns={"Unnamed: 0": "gene"}, inplace=True)
+        # score_tmp_df.index.name = "gene"
         stratification_name = file.split("/")[-3]
         score_tmp_df["stratification"] = stratification_name
         merged_scores.append(score_tmp_df)
+
+    # concatenate all DataFrames
     merged_scores_df = pd.concat(merged_scores, axis=0)
     merged_scores_df.to_csv(
         f"{config.OUTPUT_DIR}/celloracle/total_merged_scores.csv", index=False
