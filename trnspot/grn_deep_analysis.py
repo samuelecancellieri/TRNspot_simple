@@ -55,8 +55,15 @@ def plot_heatmap_single_score(
     ).fillna(0)
 
     # Select top genes by absolute aggregated signal across stratifications
-    top_genes_idx = pivot_df.abs().sum(axis=1).nlargest(top_n_genes).index
-    pivot_top = pivot_df.loc[top_genes_idx]
+    # select top_n_genes per stratification then merge (union)
+    selected = set()
+    for strat in pivot_df.columns:
+        selected.update(pivot_df[strat].abs().nlargest(top_n_genes).index)
+    selected = list(selected)
+    # keep ordering by descending absolute aggregated signal across stratifications
+    pivot_top = pivot_df.loc[selected].reindex(
+        pivot_df.loc[selected].abs().sum(axis=1).sort_values(ascending=False).index
+    )
 
     # Plot heatmap
     fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SQUARED_LARGE)
@@ -87,7 +94,7 @@ def plot_heatmap_single_score(
 
 def plot_heatmap_scores(
     scores_df: pd.DataFrame,
-    top_n_genes: int = 20,
+    top_n_genes: int = 10,
     scores: list[str] = [
         "degree_all",
         "degree_centrality_all",

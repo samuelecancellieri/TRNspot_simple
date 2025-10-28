@@ -36,7 +36,7 @@ python run_complete_analysis.py
 python examples/complete_pipeline.py
 
 # Run with your own data
-python run_complete_analysis.py --input your_data.h5ad --output results --figures plots
+python run_complete_analysis.py --input your_data.h5ad --output results
 
 # Skip specific analyses
 python run_complete_analysis.py --skip-celloracle  # Skip GRN inference
@@ -48,6 +48,41 @@ python run_complete_analysis.py --seed 123 --n-jobs 16 --min-genes 300
 # See all options
 python run_complete_analysis.py --help
 ```
+
+### Modular Execution & Parallel Processing
+
+NEW: The pipeline now supports modular execution and parallel processing:
+
+```bash
+# Run only specific steps
+python examples/complete_pipeline.py \
+    --input data.h5ad \
+    --output results \
+    --steps load preprocessing clustering
+
+# Stratified analysis in parallel (multiple cell types/clusters)
+python examples/complete_pipeline.py \
+    --input data.h5ad \
+    --output results \
+    --cluster-key-stratification celltype \
+    --parallel \
+    --n-jobs 4
+
+# Resume from checkpoints
+python examples/complete_pipeline.py \
+    --input data.h5ad \
+    --output results \
+    --steps celloracle hotspot  # Skips preprocessing if checkpoint exists
+```
+
+**Available step names:** `load`, `preprocessing`, `stratification`, `clustering`, `celloracle`, `hotspot`, `grn_analysis`, `summary`
+
+**Parallel benefits:**
+
+- Process multiple stratifications simultaneously
+- Linear speedup with number of workers
+- Automatic checkpoint integration
+- See [Controller Guide](docs/CONTROLLER_QUICK_REF.md) for details
 
 The complete pipeline includes:
 

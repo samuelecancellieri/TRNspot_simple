@@ -26,6 +26,14 @@ import pickle
 import hashlib
 import json
 
+# Use multiprocess library for better serialization support
+try:
+    from multiprocess import Pool
+except ImportError:
+    print("Warning: multiprocess not found, using multiprocessing")
+    print("Install multiprocess for better compatibility: pip install multiprocess")
+    from multiprocessing import Pool
+
 # Import TRNspot modules
 from trnspot import set_random_seed, set_scanpy_settings, config
 from trnspot.preprocessing import (
@@ -90,6 +98,400 @@ def check_checkpoint(log_dir, step_name, input_hash):
         print(f"  ⚠ Error reading checkpoint: {e}")
 
     return False
+
+
+# Module-level worker function for parallel processing
+# This must be at module level to be picklable
+def _process_stratification_worker(work_data):
+    """
+    Worker function for parallel stratification processing.
+
+    This is a top-level function to ensure it can be pickled by multiprocess.
+
+    Parameters:
+    -----------
+    work_data : dict
+        Dictionary containing:
+        - adata_cluster: AnnData object for this stratification
+        - stratification_name: Name of the stratification
+        - args: Controller arguments
+        - start_time: Pipeline start time
+
+    Returns:
+    --------
+    str : Path to the stratified output directory
+    """
+    adata_cluster = work_data["adata_cluster"]
+    stratification_name = work_data["stratification_name"]
+    args = work_data["args"]
+    start_time = work_data["start_time"]
+
+    # Create stratified output directory
+    stratified_output_dir = os.path.join(
+        args.output, "stratified_analysis", str(stratification_name)
+    )
+    stratified_figures_dir = os.path.join(stratified_output_dir, "figures")
+    stratified_log_dir = os.path.join(stratified_output_dir, "logs")
+
+    print(f"\n{'='*70}")
+    print(f"Processing stratified dataset: {stratification_name}")
+    print(f"{'='*70}")
+    print(f"  Output directory: {stratified_output_dir}")
+
+    # Create directories for this stratification
+    setup_directories(stratified_output_dir, stratified_figures_dir)
+
+    # Update config for this stratification
+    config.update_config(
+        OUTPUT_DIR=stratified_output_dir,
+        FIGURES_DIR=stratified_figures_dir,
+        FIGURES_DIR_QC=os.path.join(stratified_figures_dir, "qc"),
+        FIGURES_DIR_GRN=os.path.join(stratified_figures_dir, "grn"),
+        FIGURES_DIR_HOTSPOT=os.path.join(stratified_figures_dir, "hotspot"),
+    )
+
+    # Run pipeline steps
+    adata_clustered = dimensionality_reduction_clustering(
+        adata_cluster, cluster_key=args.cluster_key, log_dir=stratified_log_dir
+    )
+
+    celloracle_result = celloracle_pipeline(
+        adata_clustered,
+        cluster_key=args.cluster_key,
+        species=args.species,
+        raw_count_layer=args.raw_count_layer,
+        embedding_name=args.embedding_grn,
+        TG_to_TF_dictionary=args.tf_dictionary,
+        skip_celloracle=args.skip_celloracle,
+        log_dir=stratified_log_dir,
+    )
+
+    hotspot_result = hotspot_pipeline(
+        adata_clustered,
+        layer_key=args.raw_count_layer,
+        embedding_key=args.embedding_hotspot,
+        skip_hotspot=args.skip_hotspot,
+        log_dir=stratified_log_dir,
+    )
+
+    # Generate summary
+    generate_summary(
+        adata_clustered,
+        celloracle_result,
+        hotspot_result,
+        start_time,
+        stratified_output_dir,
+    )
+
+    # Run GRN deep analysis
+    grn_score_file = os.path.join(
+        stratified_output_dir, "celloracle", "grn_merged_scores.csv"
+    )
+    if os.path.exists(grn_score_file):
+        grn_deep_analysis_pipeline(grn_score_file)
+
+    return stratified_output_dir
+
+
+class PipelineController:
+    """Controller for managing TRNspot pipeline execution."""
+
+    def __init__(self, args, start_time):
+        """Initialize pipeline controller with arguments."""
+        self.args = args
+        self.start_time = start_time
+        self.log_dir = os.path.join(args.output, "logs")
+
+        # Data containers
+        self.adata = None
+        self.adata_preprocessed = None
+        self.adata_list = []
+        self.adata_stratification_list = []
+
+    def run_step_load(self):
+        """Execute Step 1: Data Loading."""
+        self.adata = load_data(self.args.input)
+        return self.adata
+
+    def run_step_preprocessing(self):
+        """Execute Step 2: Preprocessing."""
+        if self.adata is None:
+            raise ValueError("Data not loaded. Run step_load first.")
+        self.adata_preprocessed = preprocessing_pipeline(
+            self.adata, self.args.name, skip_qc=self.args.skip_qc, log_dir=self.log_dir
+        )
+        return self.adata_preprocessed
+
+    def run_step_stratification(self):
+        """Execute Step 2.5: Stratification."""
+        if self.adata_preprocessed is None:
+            raise ValueError("Data not preprocessed. Run step_preprocessing first.")
+        self.adata_list, self.adata_stratification_list = stratification_pipeline(
+            self.adata_preprocessed, self.args.cluster_key_stratification
+        )
+        return self.adata_list, self.adata_stratification_list
+
+    def run_step_clustering(self, adata=None, log_dir=None):
+        """Execute Step 3: Clustering."""
+        if adata is None:
+            adata = self.adata_preprocessed
+        if adata is None:
+            raise ValueError("No data available for clustering.")
+        if log_dir is None:
+            log_dir = self.log_dir
+
+        return dimensionality_reduction_clustering(
+            adata, cluster_key=self.args.cluster_key, log_dir=log_dir
+        )
+
+    def run_step_celloracle(self, adata, log_dir=None):
+        """Execute Step 4: CellOracle."""
+        if log_dir is None:
+            log_dir = self.log_dir
+
+        return celloracle_pipeline(
+            adata,
+            cluster_key=self.args.cluster_key,
+            species=self.args.species,
+            raw_count_layer=self.args.raw_count_layer,
+            embedding_name=self.args.embedding_grn,
+            TG_to_TF_dictionary=self.args.tf_dictionary,
+            skip_celloracle=self.args.skip_celloracle,
+            log_dir=log_dir,
+        )
+
+    def run_step_hotspot(self, adata, log_dir=None):
+        """Execute Step 5: Hotspot."""
+        if log_dir is None:
+            log_dir = self.log_dir
+
+        return hotspot_pipeline(
+            adata,
+            layer_key=self.args.raw_count_layer,
+            embedding_key=self.args.embedding_hotspot,
+            skip_hotspot=self.args.skip_hotspot,
+            log_dir=log_dir,
+        )
+
+    def run_step_grn_analysis(self, grn_score_path):
+        """Execute Step 6: GRN Deep Analysis."""
+        return grn_deep_analysis_pipeline(grn_score_path)
+
+    def process_single_stratification(self, adata_cluster, stratification_name):
+        """Process a single stratified dataset."""
+        # Create stratified folder INSIDE the main output directory
+        stratified_output_dir = os.path.join(
+            self.args.output, "stratified_analysis", str(stratification_name)
+        )
+        stratified_figures_dir = os.path.join(stratified_output_dir, "figures")
+        stratified_log_dir = os.path.join(stratified_output_dir, "logs")
+
+        print(f"\n{'='*70}")
+        print(f"Processing stratified dataset: {stratification_name}")
+        print(f"{'='*70}")
+        print(f"  Output directory: {stratified_output_dir}")
+
+        # Create directories for this stratification
+        setup_directories(stratified_output_dir, stratified_figures_dir)
+
+        # Update config for this stratification
+        config.update_config(
+            OUTPUT_DIR=stratified_output_dir,
+            FIGURES_DIR=stratified_figures_dir,
+            FIGURES_DIR_QC=os.path.join(stratified_figures_dir, "qc"),
+            FIGURES_DIR_GRN=os.path.join(stratified_figures_dir, "grn"),
+            FIGURES_DIR_HOTSPOT=os.path.join(stratified_figures_dir, "hotspot"),
+        )
+
+        # Run pipeline steps
+        adata_clustered = dimensionality_reduction_clustering(
+            adata_cluster, cluster_key=self.args.cluster_key, log_dir=stratified_log_dir
+        )
+
+        celloracle_result = self.run_step_celloracle(
+            adata_clustered, log_dir=stratified_log_dir
+        )
+
+        hotspot_result = self.run_step_hotspot(
+            adata_clustered, log_dir=stratified_log_dir
+        )
+
+        # Generate summary
+        generate_summary(
+            adata_clustered,
+            celloracle_result,
+            hotspot_result,
+            self.start_time,
+            stratified_output_dir,
+        )
+
+        # Run GRN deep analysis
+        grn_score_file = os.path.join(
+            stratified_output_dir, "celloracle", "grn_merged_scores.csv"
+        )
+        if os.path.exists(grn_score_file):
+            grn_deep_analysis_pipeline(grn_score_file)
+
+        return stratified_output_dir
+
+    def run_stratified_pipeline_sequential(self):
+        """Run stratified pipeline sequentially."""
+        results = []
+        for adata_cluster, stratification_name in zip(
+            self.adata_list, self.adata_stratification_list
+        ):
+            result = self.process_single_stratification(
+                adata_cluster, stratification_name
+            )
+            results.append(result)
+        return results
+
+    def run_stratified_pipeline_parallel(self, n_jobs=None):
+        """Run stratified pipeline in parallel using multiprocess."""
+        if n_jobs is None:
+            n_jobs = min(self.args.n_jobs, len(self.adata_list))
+
+        print(f"\n{'='*70}")
+        print(f"Running stratified analysis in parallel ({n_jobs} workers)")
+        print(f"{'='*70}")
+
+        # Prepare work items as dictionaries (easier to serialize)
+        work_items = []
+        for adata_cluster, stratification_name in zip(
+            self.adata_list, self.adata_stratification_list
+        ):
+            work_items.append(
+                {
+                    "adata_cluster": adata_cluster,
+                    "stratification_name": stratification_name,
+                    "args": self.args,
+                    "start_time": self.start_time,
+                }
+            )
+
+        # Run in parallel using module-level worker function
+        with Pool(n_jobs) as pool:
+            results = pool.map(_process_stratification_worker, work_items)
+
+        return results
+
+    def run_complete_pipeline(self, steps=None, parallel=False):
+        """
+        Run complete pipeline or specific steps.
+
+        Parameters:
+        -----------
+        steps : list of str, optional
+            Specific steps to run. Options:
+            'load', 'preprocessing', 'stratification', 'clustering',
+            'celloracle', 'hotspot', 'grn_analysis', 'summary'
+            If None, runs all steps.
+        parallel : bool, default=False
+            Whether to run stratified analyses in parallel.
+        """
+        if steps is None:
+            steps = [
+                "load",
+                "preprocessing",
+                "stratification",
+                "clustering",
+                "celloracle",
+                "hotspot",
+                "grn_analysis",
+                "summary",
+            ]
+
+        # Step 1: Load data
+        if "load" in steps:
+            self.run_step_load()
+
+        # Step 2: Preprocessing
+        if "preprocessing" in steps:
+            self.run_step_preprocessing()
+
+        # Step 2.5: Stratification
+        if "stratification" in steps:
+            self.run_step_stratification()
+
+        # Process stratified or non-stratified
+        if self.args.cluster_key_stratification and self.adata_list:
+            # Stratified analysis
+            if parallel:
+                self.run_stratified_pipeline_parallel()
+            else:
+                self.run_stratified_pipeline_sequential()
+        else:
+            # Non-stratified analysis
+            if "clustering" in steps:
+                adata_clustered = self.run_step_clustering()
+            else:
+                adata_clustered = self.adata_preprocessed
+
+            celloracle_result = None
+            hotspot_result = None
+
+            if "celloracle" in steps:
+                celloracle_result = self.run_step_celloracle(adata_clustered)
+
+            if "hotspot" in steps:
+                hotspot_result = self.run_step_hotspot(adata_clustered)
+
+            if "summary" in steps:
+                generate_summary(
+                    adata_clustered,
+                    celloracle_result,
+                    hotspot_result,
+                    self.start_time,
+                    self.args.output,
+                )
+
+            if "grn_analysis" in steps and not self.args.skip_celloracle:
+                grn_score_file = os.path.join(
+                    self.args.output, "celloracle", "grn_merged_scores.csv"
+                )
+                if os.path.exists(grn_score_file):
+                    self.run_step_grn_analysis(grn_score_file)
+
+        # Final summary
+        if "summary" in steps:
+            self.print_final_summary()
+
+    def print_final_summary(self):
+        """Print final pipeline summary."""
+        print(f"\n{'='*70}")
+        print("Pipeline completed successfully! ✓")
+        print(f"{'='*70}")
+
+        if self.adata_stratification_list:
+            print(
+                f"\nProcessed {len(self.adata_stratification_list)} "
+                f"stratified datasets:"
+            )
+            for stratification in self.adata_stratification_list:
+                print(f"  - {os.path.join(self.args.output, str(stratification))}/")
+        else:
+            print(f"\nResults saved to: {self.args.output}/")
+
+        # Track output files
+        track_files(self.args.output)
+
+        # Reset config and generate overall analysis
+        config.update_config(
+            OUTPUT_DIR=self.args.output,
+            FIGURES_DIR=os.path.join(self.args.output, "figures"),
+            FIGURES_DIR_QC=os.path.join(self.args.output, "figures", "qc"),
+            FIGURES_DIR_GRN=os.path.join(self.args.output, "figures", "grn"),
+            FIGURES_DIR_HOTSPOT=os.path.join(self.args.output, "figures", "hotspot"),
+        )
+
+        if self.adata_stratification_list and not self.args.skip_celloracle:
+            from trnspot.grn_deep_analysis import merge_scores, plot_heatmap_scores
+
+            tracked_files_path = os.path.join(self.args.output, "tracked_files.txt")
+            if os.path.exists(tracked_files_path):
+                total_merged_scores = merge_scores(tracked_files_path)
+                plot_heatmap_scores(total_merged_scores)
+                print("  ✓ Generated overall GRN deep analysis heatmap")
 
 
 def setup_directories(output_dir, figures_dir, debug=False):
@@ -641,6 +1043,12 @@ Examples:
   # Skip specific analyses
   python complete_pipeline.py --skip-celloracle --skip-hotspot
   
+  # Run stratified analysis in parallel
+  python complete_pipeline.py --cluster-key-stratification celltype --parallel
+  
+  # Run specific steps only
+  python complete_pipeline.py --steps load preprocessing clustering
+  
   # Custom configuration
   python complete_pipeline.py --seed 123 --n-jobs 16
         """,
@@ -767,6 +1175,20 @@ Examples:
         default=False,
         help="Enable debug mode",
     )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help="Run stratified analyses in parallel (requires stratification)",
+    )
+    parser.add_argument(
+        "--steps",
+        nargs="+",
+        default=None,
+        help="Specific pipeline steps to run (space-separated): "
+        "load preprocessing stratification clustering celloracle "
+        "hotspot grn_analysis summary",
+    )
 
     args = parser.parse_args()
 
@@ -812,156 +1234,27 @@ Examples:
     print(f"Output directory: {args.output}")
     print(f"Figures directory: {os.path.join(args.output, 'figures')}")
     print(f"Parallel jobs: {args.n_jobs}")
-    print(f"QC thresholds: min_genes={args.min_genes}, min_counts={args.min_counts}")
+
+    # Print non-default input arguments
+    non_default_args = []
+    for arg, value in vars(args).items():
+        default_value = parser.get_default(arg)
+        if value != default_value:
+            non_default_args.append(f"  {arg}: {value}")
+
+    if non_default_args:
+        print("\nNon-default arguments:")
+        for arg_info in non_default_args:
+            print(arg_info)
+    else:
+        print("\nAll arguments using default values")
 
     try:
+        # Create pipeline controller
+        controller = PipelineController(args, start_time)
+
         # Run pipeline
-        log_dir = os.path.join(args.output, "logs")
-
-        adata = load_data(args.input)
-        adata_preprocessed = preprocessing_pipeline(
-            adata, args.name, skip_qc=args.skip_qc, log_dir=log_dir
-        )
-        adata_list, adata_stratification_list = stratification_pipeline(
-            adata_preprocessed, args.cluster_key_stratification
-        )
-
-        if args.cluster_key_stratification:
-            # Process each stratified adata
-            for idx, (adata_l, adata_stratification) in enumerate(
-                zip(adata_list, adata_stratification_list)
-            ):
-                # Create stratified folder INSIDE the main output directory
-                stratified_output_dir = os.path.join(
-                    args.output, str(adata_stratification)
-                )
-                stratified_figures_dir = os.path.join(stratified_output_dir, "figures")
-                stratified_log_dir = os.path.join(stratified_output_dir, "logs")
-
-                print(f"\n{'='*70}")
-                print(f"Processing stratified dataset: {adata_stratification}")
-                print(f"{'='*70}")
-                print(f"  Output directory: {stratified_output_dir}")
-
-                # Create directories for this stratification
-                setup_directories(stratified_output_dir, stratified_figures_dir)
-
-                # Update config for this stratification
-                config.update_config(
-                    OUTPUT_DIR=stratified_output_dir,
-                    FIGURES_DIR=stratified_figures_dir,
-                    FIGURES_DIR_QC=os.path.join(stratified_figures_dir, "qc"),
-                    FIGURES_DIR_GRN=os.path.join(stratified_figures_dir, "grn"),
-                    FIGURES_DIR_HOTSPOT=os.path.join(stratified_figures_dir, "hotspot"),
-                )
-
-                # Process each stratified adata
-                adata_l = dimensionality_reduction_clustering(
-                    adata_l, cluster_key=args.cluster_key, log_dir=stratified_log_dir
-                )
-                celloracle_result = celloracle_pipeline(
-                    adata_l,
-                    cluster_key=args.cluster_key,
-                    species=args.species,
-                    raw_count_layer=args.raw_count_layer,
-                    embedding_name=args.embedding_grn,
-                    TG_to_TF_dictionary=args.tf_dictionary,
-                    skip_celloracle=args.skip_celloracle,
-                    log_dir=stratified_log_dir,
-                )
-                hotspot_result = hotspot_pipeline(
-                    adata_l,
-                    layer_key=args.raw_count_layer,
-                    embedding_key=args.embedding_hotspot,
-                    skip_hotspot=args.skip_hotspot,
-                    log_dir=stratified_log_dir,
-                )
-
-                # Generate summary
-                generate_summary(
-                    adata_l,
-                    celloracle_result,
-                    hotspot_result,
-                    start_time,
-                    stratified_output_dir,
-                )
-
-                # Run GRN deep analysis on the tracked files
-                grn_deep_analysis_pipeline(
-                    os.path.join(
-                        stratified_output_dir, "celloracle", "grn_merged_scores.csv"
-                    )
-                )
-        else:
-            # No stratification; process the original adata
-            adata_l = dimensionality_reduction_clustering(
-                adata_preprocessed, cluster_key=args.cluster_key, log_dir=log_dir
-            )
-            celloracle_result = celloracle_pipeline(
-                adata_l,
-                cluster_key=args.cluster_key,
-                species=args.species,
-                raw_count_layer=args.raw_count_layer,
-                embedding_name=args.embedding_grn,
-                TG_to_TF_dictionary=args.tf_dictionary,
-                skip_celloracle=args.skip_celloracle,
-                log_dir=log_dir,
-            )
-            hotspot_result = hotspot_pipeline(
-                adata_l,
-                layer_key=args.raw_count_layer,
-                embedding_key=args.embedding_hotspot,
-                skip_hotspot=args.skip_hotspot,
-                log_dir=log_dir,
-            )
-
-            # Generate summary
-            generate_summary(
-                adata_l,
-                celloracle_result,
-                hotspot_result,
-                start_time,
-                args.output,
-            )
-
-            # Run GRN deep analysis on the tracked files
-            grn_deep_analysis_pipeline(
-                os.path.join(
-                    stratified_output_dir, "celloracle", "grn_merged_scores.csv"
-                )
-            )
-
-        # Print final summary for all stratifications
-        print(f"\n{'='*70}")
-        print("Pipeline completed successfully! ✓")
-        print(f"{'='*70}")
-
-        if adata_stratification_list:
-            print(f"\nProcessed {len(adata_stratification_list)} stratified datasets:")
-            for stratification in adata_stratification_list:
-                print(f"  - {os.path.join(args.output, str(stratification))}/")
-        else:
-            print(f"\nResults saved to: {args.output}/")
-
-        # Track output files to keep record of all the files generated by the pipeline
-        track_files(args.output)
-
-        # Reset config back to main output directory
-        config.update_config(
-            OUTPUT_DIR=args.output,
-            FIGURES_DIR=os.path.join(args.output, "figures"),
-            FIGURES_DIR_QC=os.path.join(args.output, "figures", "qc"),
-            FIGURES_DIR_GRN=os.path.join(args.output, "figures", "grn"),
-            FIGURES_DIR_HOTSPOT=os.path.join(args.output, "figures", "hotspot"),
-        )
-
-        from trnspot.grn_deep_analysis import merge_scores, plot_heatmap_scores
-
-        total_merged_scores = merge_scores(
-            os.path.join(args.output, "tracked_files.txt")
-        )
-        plot_heatmap_scores(total_merged_scores)
-        print("  ✓ Generated overall GRN deep analysis heatmap")
+        controller.run_complete_pipeline(steps=args.steps, parallel=args.parallel)
 
         return 0
 
