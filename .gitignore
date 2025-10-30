@@ -94,3 +94,4 @@ data/
 *.oracle
 *.links
 *.checkpoint
+*.log

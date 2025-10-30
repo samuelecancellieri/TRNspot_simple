@@ -399,6 +399,7 @@ def perform_grn_pre_processing(
 
     sc.tl.draw_graph(adata_cc, init_pos="paga")
     sc.pl.draw_graph(adata_cc, color=cluster_key, show=None, save=None)
+    print(f"  Computed draw_graph for cluster key: {cluster_key}")
 
     if adata_cc.n_obs > cell_downsample:
         print(f"  Downsampling to {cell_downsample} cells for GRN analysis")

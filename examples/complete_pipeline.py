@@ -25,14 +25,8 @@ import scanpy as sc
 import pickle
 import hashlib
 import json
-
-# Use multiprocess library for better serialization support
-try:
-    from multiprocess import Pool
-except ImportError:
-    print("Warning: multiprocess not found, using multiprocessing")
-    print("Install multiprocess for better compatibility: pip install multiprocess")
-    from multiprocessing import Pool
+import logging
+import traceback
 
 # Import TRNspot modules
 from trnspot import set_random_seed, set_scanpy_settings, config
@@ -41,6 +35,111 @@ from trnspot.preprocessing import (
     perform_normalization,
     perform_grn_pre_processing,
 )
+
+
+# Global logger instances
+pipeline_logger = None
+error_logger = None
+
+
+def setup_logging(output_dir):
+    """
+    Setup logging system for pipeline execution and errors.
+
+    Creates two log files:
+    - pipeline.log: Records all pipeline steps with timestamps
+    - error.log: Records all errors with full tracebacks
+
+    Parameters:
+    -----------
+    output_dir : str
+        Directory where log files will be created
+    """
+    global pipeline_logger, error_logger
+
+    log_dir = os.path.join(output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Pipeline logger - tracks all steps
+    pipeline_logger = logging.getLogger("pipeline")
+    pipeline_logger.setLevel(logging.INFO)
+    pipeline_logger.handlers.clear()
+
+    pipeline_handler = logging.FileHandler(
+        os.path.join(log_dir, "pipeline.log"), mode="a"
+    )
+    pipeline_handler.setLevel(logging.INFO)
+    pipeline_formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    pipeline_handler.setFormatter(pipeline_formatter)
+    pipeline_logger.addHandler(pipeline_handler)
+
+    # Error logger - tracks all errors with tracebacks
+    error_logger = logging.getLogger("error")
+    error_logger.setLevel(logging.ERROR)
+    error_logger.handlers.clear()
+
+    error_handler = logging.FileHandler(os.path.join(log_dir, "error.log"), mode="a")
+    error_handler.setLevel(logging.ERROR)
+    error_formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s\n%(exc_info)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    error_handler.setFormatter(error_formatter)
+    error_logger.addHandler(error_handler)
+
+    # Log the start of a new session
+    pipeline_logger.info("=" * 70)
+    pipeline_logger.info("NEW PIPELINE SESSION STARTED")
+    pipeline_logger.info("=" * 70)
+
+    return pipeline_logger, error_logger
+
+
+def log_step(step_name, status="STARTED", details=None):
+    """
+    Log a pipeline step with timestamp.
+
+    Parameters:
+    -----------
+    step_name : str
+        Name of the pipeline step
+    status : str
+        Status of the step (STARTED, COMPLETED, FAILED, etc.)
+    details : dict, optional
+        Additional details to log (e.g., n_obs, n_vars)
+    """
+    if pipeline_logger is None:
+        return
+
+    message = f"[{step_name}] {status}"
+    if details:
+        detail_str = ", ".join([f"{k}={v}" for k, v in details.items()])
+        message += f" - {detail_str}"
+
+    pipeline_logger.info(message)
+
+
+def log_error(error_context, exception):
+    """
+    Log an error with full traceback.
+
+    Parameters:
+    -----------
+    error_context : str
+        Description of where/when the error occurred
+    exception : Exception
+        The exception that was raised
+    """
+    if error_logger is None:
+        return
+
+    error_logger.error(f"ERROR in {error_context}: {str(exception)}", exc_info=True)
+
+    # Also log to pipeline logger
+    if pipeline_logger:
+        pipeline_logger.error(f"ERROR in {error_context}: {str(exception)}")
 
 
 def compute_input_hash(input_path, **params):
@@ -100,99 +199,6 @@ def check_checkpoint(log_dir, step_name, input_hash):
     return False
 
 
-# Module-level worker function for parallel processing
-# This must be at module level to be picklable
-def _process_stratification_worker(work_data):
-    """
-    Worker function for parallel stratification processing.
-
-    This is a top-level function to ensure it can be pickled by multiprocess.
-
-    Parameters:
-    -----------
-    work_data : dict
-        Dictionary containing:
-        - adata_cluster: AnnData object for this stratification
-        - stratification_name: Name of the stratification
-        - args: Controller arguments
-        - start_time: Pipeline start time
-
-    Returns:
-    --------
-    str : Path to the stratified output directory
-    """
-    adata_cluster = work_data["adata_cluster"]
-    stratification_name = work_data["stratification_name"]
-    args = work_data["args"]
-    start_time = work_data["start_time"]
-
-    # Create stratified output directory
-    stratified_output_dir = os.path.join(
-        args.output, "stratified_analysis", str(stratification_name)
-    )
-    stratified_figures_dir = os.path.join(stratified_output_dir, "figures")
-    stratified_log_dir = os.path.join(stratified_output_dir, "logs")
-
-    print(f"\n{'='*70}")
-    print(f"Processing stratified dataset: {stratification_name}")
-    print(f"{'='*70}")
-    print(f"  Output directory: {stratified_output_dir}")
-
-    # Create directories for this stratification
-    setup_directories(stratified_output_dir, stratified_figures_dir)
-
-    # Update config for this stratification
-    config.update_config(
-        OUTPUT_DIR=stratified_output_dir,
-        FIGURES_DIR=stratified_figures_dir,
-        FIGURES_DIR_QC=os.path.join(stratified_figures_dir, "qc"),
-        FIGURES_DIR_GRN=os.path.join(stratified_figures_dir, "grn"),
-        FIGURES_DIR_HOTSPOT=os.path.join(stratified_figures_dir, "hotspot"),
-    )
-
-    # Run pipeline steps
-    adata_clustered = dimensionality_reduction_clustering(
-        adata_cluster, cluster_key=args.cluster_key, log_dir=stratified_log_dir
-    )
-
-    celloracle_result = celloracle_pipeline(
-        adata_clustered,
-        cluster_key=args.cluster_key,
-        species=args.species,
-        raw_count_layer=args.raw_count_layer,
-        embedding_name=args.embedding_grn,
-        TG_to_TF_dictionary=args.tf_dictionary,
-        skip_celloracle=args.skip_celloracle,
-        log_dir=stratified_log_dir,
-    )
-
-    hotspot_result = hotspot_pipeline(
-        adata_clustered,
-        layer_key=args.raw_count_layer,
-        embedding_key=args.embedding_hotspot,
-        skip_hotspot=args.skip_hotspot,
-        log_dir=stratified_log_dir,
-    )
-
-    # Generate summary
-    generate_summary(
-        adata_clustered,
-        celloracle_result,
-        hotspot_result,
-        start_time,
-        stratified_output_dir,
-    )
-
-    # Run GRN deep analysis
-    grn_score_file = os.path.join(
-        stratified_output_dir, "celloracle", "grn_merged_scores.csv"
-    )
-    if os.path.exists(grn_score_file):
-        grn_deep_analysis_pipeline(grn_score_file)
-
-    return stratified_output_dir
-
-
 class PipelineController:
     """Controller for managing TRNspot pipeline execution."""
 
@@ -208,74 +214,140 @@ class PipelineController:
         self.adata_list = []
         self.adata_stratification_list = []
 
+        log_step(
+            "PipelineController",
+            "INITIALIZED",
+            {
+                "output_dir": args.output,
+                "stratification_key": args.cluster_key_stratification,
+            },
+        )
+
     def run_step_load(self):
         """Execute Step 1: Data Loading."""
-        self.adata = load_data(self.args.input)
-        return self.adata
+        log_step("Controller.LoadData", "STARTED")
+        try:
+            self.adata = load_data(self.args.input)
+            log_step("Controller.LoadData", "COMPLETED")
+            return self.adata
+        except Exception as e:
+            log_error("Controller.LoadData", e)
+            raise
 
     def run_step_preprocessing(self):
         """Execute Step 2: Preprocessing."""
-        if self.adata is None:
-            raise ValueError("Data not loaded. Run step_load first.")
-        self.adata_preprocessed = preprocessing_pipeline(
-            self.adata, self.args.name, skip_qc=self.args.skip_qc, log_dir=self.log_dir
-        )
-        return self.adata_preprocessed
+        log_step("Controller.Preprocessing", "STARTED")
+        try:
+            if self.adata is None:
+                raise ValueError("Data not loaded. Run step_load first.")
+            self.adata_preprocessed = preprocessing_pipeline(
+                self.adata,
+                self.args.name,
+                skip_qc=self.args.skip_qc,
+                log_dir=self.log_dir,
+            )
+            log_step("Controller.Preprocessing", "COMPLETED")
+            return self.adata_preprocessed
+        except Exception as e:
+            log_error("Controller.Preprocessing", e)
+            raise
 
     def run_step_stratification(self):
         """Execute Step 2.5: Stratification."""
-        if self.adata_preprocessed is None:
-            raise ValueError("Data not preprocessed. Run step_preprocessing first.")
-        self.adata_list, self.adata_stratification_list = stratification_pipeline(
-            self.adata_preprocessed, self.args.cluster_key_stratification
-        )
-        return self.adata_list, self.adata_stratification_list
+        log_step("Controller.Stratification", "STARTED")
+        try:
+            if self.adata_preprocessed is None:
+                raise ValueError("Data not preprocessed. Run step_preprocessing first.")
+            self.adata_list, self.adata_stratification_list = stratification_pipeline(
+                self.adata_preprocessed,
+                self.args.cluster_key_stratification,
+                self.args.clusters,
+            )
+            log_step(
+                "Controller.Stratification",
+                "COMPLETED",
+                {"n_stratifications": len(self.adata_list)},
+            )
+            return self.adata_list, self.adata_stratification_list
+        except Exception as e:
+            log_error("Controller.Stratification", e)
+            raise
 
     def run_step_clustering(self, adata=None, log_dir=None):
         """Execute Step 3: Clustering."""
-        if adata is None:
-            adata = self.adata_preprocessed
-        if adata is None:
-            raise ValueError("No data available for clustering.")
-        if log_dir is None:
-            log_dir = self.log_dir
+        log_step("Controller.Clustering", "STARTED")
+        try:
+            if adata is None:
+                adata = self.adata_preprocessed
+            if adata is None:
+                raise ValueError("No data available for clustering.")
+            if log_dir is None:
+                log_dir = self.log_dir
 
-        return dimensionality_reduction_clustering(
-            adata, cluster_key=self.args.cluster_key, log_dir=log_dir
-        )
+            result = dimensionality_reduction_clustering(
+                adata, cluster_key=self.args.cluster_key, log_dir=log_dir
+            )
+            log_step("Controller.Clustering", "COMPLETED")
+            return result
+        except Exception as e:
+            log_error("Controller.Clustering", e)
+            raise
 
     def run_step_celloracle(self, adata, log_dir=None):
         """Execute Step 4: CellOracle."""
-        if log_dir is None:
-            log_dir = self.log_dir
+        log_step("Controller.CellOracle", "STARTED")
+        try:
+            if log_dir is None:
+                log_dir = self.log_dir
 
-        return celloracle_pipeline(
-            adata,
-            cluster_key=self.args.cluster_key,
-            species=self.args.species,
-            raw_count_layer=self.args.raw_count_layer,
-            embedding_name=self.args.embedding_grn,
-            TG_to_TF_dictionary=self.args.tf_dictionary,
-            skip_celloracle=self.args.skip_celloracle,
-            log_dir=log_dir,
-        )
+            result = celloracle_pipeline(
+                adata,
+                cluster_key=self.args.cluster_key,
+                species=self.args.species,
+                raw_count_layer=self.args.raw_count_layer,
+                embedding_name=self.args.embedding_grn,
+                TG_to_TF_dictionary=self.args.tf_dictionary,
+                skip_celloracle=self.args.skip_celloracle,
+                log_dir=log_dir,
+            )
+            log_step("Controller.CellOracle", "COMPLETED")
+            return result
+        except Exception as e:
+            log_error("Controller.CellOracle", e)
+            raise
 
     def run_step_hotspot(self, adata, log_dir=None):
         """Execute Step 5: Hotspot."""
-        if log_dir is None:
-            log_dir = self.log_dir
+        log_step("Controller.Hotspot", "STARTED")
+        try:
+            if log_dir is None:
+                log_dir = self.log_dir
 
-        return hotspot_pipeline(
-            adata,
-            layer_key=self.args.raw_count_layer,
-            embedding_key=self.args.embedding_hotspot,
-            skip_hotspot=self.args.skip_hotspot,
-            log_dir=log_dir,
-        )
+            result = hotspot_pipeline(
+                adata,
+                layer_key=self.args.raw_count_layer,
+                embedding_key=self.args.embedding_hotspot,
+                skip_hotspot=self.args.skip_hotspot,
+                log_dir=log_dir,
+            )
+            log_step("Controller.Hotspot", "COMPLETED")
+            return result
+        except Exception as e:
+            log_error("Controller.Hotspot", e)
+            raise
 
     def run_step_grn_analysis(self, grn_score_path):
         """Execute Step 6: GRN Deep Analysis."""
-        return grn_deep_analysis_pipeline(grn_score_path)
+        log_step(
+            "Controller.GRNAnalysis", "STARTED", {"grn_score_path": grn_score_path}
+        )
+        try:
+            result = grn_deep_analysis_pipeline(grn_score_path)
+            log_step("Controller.GRNAnalysis", "COMPLETED")
+            return result
+        except Exception as e:
+            log_error("Controller.GRNAnalysis", e)
+            raise
 
     def process_single_stratification(self, adata_cluster, stratification_name):
         """Process a single stratified dataset."""
@@ -346,36 +418,7 @@ class PipelineController:
             results.append(result)
         return results
 
-    def run_stratified_pipeline_parallel(self, n_jobs=None):
-        """Run stratified pipeline in parallel using multiprocess."""
-        if n_jobs is None:
-            n_jobs = min(self.args.n_jobs, len(self.adata_list))
-
-        print(f"\n{'='*70}")
-        print(f"Running stratified analysis in parallel ({n_jobs} workers)")
-        print(f"{'='*70}")
-
-        # Prepare work items as dictionaries (easier to serialize)
-        work_items = []
-        for adata_cluster, stratification_name in zip(
-            self.adata_list, self.adata_stratification_list
-        ):
-            work_items.append(
-                {
-                    "adata_cluster": adata_cluster,
-                    "stratification_name": stratification_name,
-                    "args": self.args,
-                    "start_time": self.start_time,
-                }
-            )
-
-        # Run in parallel using module-level worker function
-        with Pool(n_jobs) as pool:
-            results = pool.map(_process_stratification_worker, work_items)
-
-        return results
-
-    def run_complete_pipeline(self, steps=None, parallel=False):
+    def run_complete_pipeline(self, steps=None):
         """
         Run complete pipeline or specific steps.
 
@@ -386,8 +429,6 @@ class PipelineController:
             'load', 'preprocessing', 'stratification', 'clustering',
             'celloracle', 'hotspot', 'grn_analysis', 'summary'
             If None, runs all steps.
-        parallel : bool, default=False
-            Whether to run stratified analyses in parallel.
         """
         if steps is None:
             steps = [
@@ -415,11 +456,8 @@ class PipelineController:
 
         # Process stratified or non-stratified
         if self.args.cluster_key_stratification and self.adata_list:
-            # Stratified analysis
-            if parallel:
-                self.run_stratified_pipeline_parallel()
-            else:
-                self.run_stratified_pipeline_sequential()
+            # Stratified analysis (sequential)
+            self.run_stratified_pipeline_sequential()
         else:
             # Non-stratified analysis
             if "clustering" in steps:
@@ -520,87 +558,132 @@ def setup_directories(output_dir, figures_dir, debug=False):
 
 def load_data(input_path):
     """Load data from file or use example dataset."""
+    log_step("Data Loading", "STARTED", {"input_path": input_path})
+
     print(f"\n{'='*70}")
     print("STEP 1: Data Loading")
     print(f"{'='*70}")
 
-    if input_path and os.path.exists(input_path):
-        print(f"Loading data from: {input_path}")
-        if input_path.endswith(".h5ad"):
-            adata = sc.read_h5ad(input_path)
-        elif input_path.endswith(".h5"):
-            adata = sc.read_10x_h5(input_path)
-        else:
-            raise ValueError(f"Unsupported file format: {input_path}")
-    else:
-        print("No input file specified or file not found.")
-        print("Loading example dataset: Paul et al. 2015 (hematopoietic cells)")
-        adata = sc.datasets.paul15()
+    try:
+        if input_path and os.path.exists(input_path):
+            print(f"Loading data from: {input_path}")
+            log_step("Data Loading", "READING", {"file": input_path})
 
-    print(f"✓ Loaded: {adata.n_obs} cells × {adata.n_vars} genes")
-    return adata
+            if input_path.endswith(".h5ad"):
+                adata = sc.read_h5ad(input_path)
+            elif input_path.endswith(".h5"):
+                adata = sc.read_10x_h5(input_path)
+            else:
+                raise ValueError(f"Unsupported file format: {input_path}")
+        else:
+            print("No input file specified or file not found.")
+            print("Loading example dataset: Paul et al. 2015 (hematopoietic cells)")
+            log_step("Data Loading", "USING_EXAMPLE_DATASET")
+            adata = sc.datasets.paul15()
+
+        print(f"✓ Loaded: {adata.n_obs} cells × {adata.n_vars} genes")
+        log_step(
+            "Data Loading", "COMPLETED", {"n_obs": adata.n_obs, "n_vars": adata.n_vars}
+        )
+
+        return adata
+
+    except Exception as e:
+        log_error("Data Loading", e)
+        raise
 
 
 def preprocessing_pipeline(adata, name=None, skip_qc=False, log_dir=None):
     """Run preprocessing pipeline."""
+    log_step(
+        "Preprocessing",
+        "STARTED",
+        {"n_obs": adata.n_obs, "n_vars": adata.n_vars, "skip_qc": skip_qc},
+    )
+
     print(f"\n{'='*70}")
     print("STEP 2: Quality Control and Preprocessing")
     print(f"{'='*70}")
 
-    # Check checkpoint for preprocessing
-    step_hash = compute_input_hash(
-        None,
-        n_obs=adata.n_obs,
-        n_vars=adata.n_vars,
-        min_genes=config.QC_MIN_GENES,
-        min_counts=config.QC_MIN_COUNTS,
-        pct_mt_max=config.QC_PCT_MT_MAX,
-        skip_qc=skip_qc,
-    )
-
-    checkpoint_file = os.path.join(config.OUTPUT_DIR, "preprocessed_adata.h5ad")
-    if (
-        log_dir
-        and check_checkpoint(log_dir, "preprocessing", step_hash)
-        and os.path.exists(checkpoint_file)
-    ):
-        print(f"  Loading preprocessed data from: {checkpoint_file}")
-        return sc.read_h5ad(checkpoint_file)
-
-    if not skip_qc:
-        print("\n[2.1] Performing quality control...")
-        adata = perform_qc(
-            adata,
+    try:
+        # Check checkpoint for preprocessing
+        step_hash = compute_input_hash(
+            None,
+            n_obs=adata.n_obs,
+            n_vars=adata.n_vars,
             min_genes=config.QC_MIN_GENES,
             min_counts=config.QC_MIN_COUNTS,
-            pct_counts_mt_max=config.QC_PCT_MT_MAX,
-            save_plots=name,
-        )
-        print(f"  After QC: {adata.n_obs} cells × {adata.n_vars} genes")
-    else:
-        print("\n[2.1] Skipping QC (already performed)")
-
-    # Normalization
-    print("\n[2.2] Normalizing data...")
-    adata = perform_normalization(adata)
-    print("  ✓ Normalization complete")
-
-    # Save checkpoint
-    if log_dir:
-        adata.write(checkpoint_file)
-        write_checkpoint(
-            log_dir, "preprocessing", step_hash, n_obs=adata.n_obs, n_vars=adata.n_vars
+            pct_mt_max=config.QC_PCT_MT_MAX,
+            skip_qc=skip_qc,
         )
 
-    # Store raw counts for Hotspot
-    # if adata.raw is not None:
-    #     adata.layers["raw_counts"] = adata.raw.X.copy()
-    #     print("  ✓ Stored raw counts in layer 'raw_counts'")
+        checkpoint_file = os.path.join(config.OUTPUT_DIR, "preprocessed_adata.h5ad")
+        if (
+            log_dir
+            and check_checkpoint(log_dir, "preprocessing", step_hash)
+            and os.path.exists(checkpoint_file)
+        ):
+            print(f"  Loading preprocessed data from: {checkpoint_file}")
+            log_step(
+                "Preprocessing",
+                "LOADED_FROM_CHECKPOINT",
+                {"checkpoint_file": checkpoint_file},
+            )
+            return sc.read_h5ad(checkpoint_file)
 
-    return adata
+        if not skip_qc:
+            print("\n[2.1] Performing quality control...")
+            log_step("Preprocessing.QC", "STARTED")
+
+            adata = perform_qc(
+                adata,
+                min_genes=config.QC_MIN_GENES,
+                min_counts=config.QC_MIN_COUNTS,
+                pct_counts_mt_max=config.QC_PCT_MT_MAX,
+                save_plots=name,
+            )
+            print(f"  After QC: {adata.n_obs} cells × {adata.n_vars} genes")
+            log_step(
+                "Preprocessing.QC",
+                "COMPLETED",
+                {"n_obs": adata.n_obs, "n_vars": adata.n_vars},
+            )
+        else:
+            print("\n[2.1] Skipping QC (already performed)")
+            log_step("Preprocessing.QC", "SKIPPED")
+
+        # Normalization
+        print("\n[2.2] Normalizing data...")
+        log_step("Preprocessing.Normalization", "STARTED")
+
+        adata = perform_normalization(adata)
+        print("  ✓ Normalization complete")
+        log_step("Preprocessing.Normalization", "COMPLETED")
+
+        # Save checkpoint
+        if log_dir:
+            adata.write(checkpoint_file)
+            write_checkpoint(
+                log_dir,
+                "preprocessing",
+                step_hash,
+                n_obs=adata.n_obs,
+                n_vars=adata.n_vars,
+            )
+            log_step("Preprocessing", "CHECKPOINT_SAVED", {"file": checkpoint_file})
+
+        log_step(
+            "Preprocessing", "COMPLETED", {"n_obs": adata.n_obs, "n_vars": adata.n_vars}
+        )
+
+        return adata
+
+    except Exception as e:
+        log_error("Preprocessing", e)
+        raise
 
 
-def stratification_pipeline(adata, cluster_key_stratification=None):
+def stratification_pipeline(adata, cluster_key_stratification=None, clusters="all"):
     """Perform stratification based on specified clustering key."""
     if cluster_key_stratification and cluster_key_stratification in adata.obs.columns:
         print(f"\n{'='*70}")
@@ -609,10 +692,14 @@ def stratification_pipeline(adata, cluster_key_stratification=None):
 
         adata_list = list()
         adata_stratification_list = list()
-        unique_clusters = adata.obs[cluster_key_stratification].unique()
-        print(
-            f"Stratifying data into {len(unique_clusters)} clusters based on '{cluster_key_stratification}'"
-        )
+
+        # check unique clusters and filter based on 'clusters' parameter
+        if clusters == "all":
+            unique_clusters = adata.obs[cluster_key_stratification].unique()
+        else:
+            unique_clusters = set(
+                adata.obs[cluster_key_stratification].unique()
+            ).intersection(set([c.strip() for c in clusters.split(",") if c.strip()]))
 
         for cluster in unique_clusters:
             adata_cluster = adata[
@@ -632,68 +719,102 @@ def stratification_pipeline(adata, cluster_key_stratification=None):
 
 def dimensionality_reduction_clustering(adata, cluster_key="leiden", log_dir=None):
     """Perform dimensionality reduction and clustering."""
-    print(f"\n{'='*70}")
-    print("STEP 3: Dimensionality Reduction and Clustering")
-    print(f"{'='*70}")
-
-    # Check checkpoint for clustering
-    step_hash = compute_input_hash(
-        None,
-        n_obs=adata.n_obs,
-        n_vars=adata.n_vars,
-        cluster_key=cluster_key,
-        top_genes=config.HVGS_N_TOP_GENES,
-        n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
-        n_pcs=config.NEIGHBORS_N_PCS,
+    log_step(
+        "DimReduction_Clustering",
+        "STARTED",
+        {"n_obs": adata.n_obs, "n_vars": adata.n_vars, "cluster_key": cluster_key},
     )
 
-    checkpoint_file = f"{config.OUTPUT_DIR}/clustered_adata.h5ad"
-    if (
-        log_dir
-        and check_checkpoint(log_dir, "clustering", step_hash)
-        and os.path.exists(checkpoint_file)
-    ):
-        print(f"  Loading clustered data from: {checkpoint_file}")
-        return sc.read_h5ad(checkpoint_file)
+    try:
+        print(f"\n{'='*70}")
+        print("STEP 3: Dimensionality Reduction and Clustering")
+        print(f"{'='*70}")
 
-    # GRN preprocessing (includes HVG, PCA, diffusion map, PAGA)
-    print("\n[3.1] Running GRN preprocessing pipeline...")
-    adata = perform_grn_pre_processing(
-        adata,
-        cluster_key=cluster_key,  # Will create leiden clustering
-        top_genes=config.HVGS_N_TOP_GENES,
-        n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
-        n_pcs=config.NEIGHBORS_N_PCS,
-    )
-
-    # UMAP for visualization
-    print("\n[3.2] Computing UMAP embedding...")
-    sc.tl.umap(adata)
-    print("  ✓ UMAP complete")
-
-    # Leiden clustering if not already done
-    if "leiden" not in adata.obs.columns:
-        print("\n[3.3] Performing Leiden clustering...")
-        sc.tl.leiden(adata, resolution=1.0)
-        n_clusters = len(adata.obs["leiden"].unique())
-        print(f"  ✓ Identified {n_clusters} clusters")
-    else:
-        n_clusters = len(adata.obs["leiden"].unique())
-        print(f"\n[3.3] Using existing Leiden clustering ({n_clusters} clusters)")
-
-    # Save checkpoint
-    if log_dir:
-        adata.write(checkpoint_file)
-        write_checkpoint(
-            log_dir,
-            "clustering",
-            step_hash,
+        # Check checkpoint for clustering
+        step_hash = compute_input_hash(
+            None,
             n_obs=adata.n_obs,
             n_vars=adata.n_vars,
-            n_clusters=n_clusters,
+            cluster_key=cluster_key,
+            top_genes=config.HVGS_N_TOP_GENES,
+            n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
+            n_pcs=config.NEIGHBORS_N_PCS,
         )
 
-    return adata
+        checkpoint_file = f"{config.OUTPUT_DIR}/clustered_adata.h5ad"
+        if (
+            log_dir
+            and check_checkpoint(log_dir, "clustering", step_hash)
+            and os.path.exists(checkpoint_file)
+        ):
+            log_step(
+                "DimReduction_Clustering.Checkpoint",
+                "LOADED",
+                {"checkpoint_file": checkpoint_file},
+            )
+            print(f"  Loading clustered data from: {checkpoint_file}")
+            return sc.read_h5ad(checkpoint_file)
+
+        # GRN preprocessing (includes HVG, PCA, diffusion map, PAGA)
+        log_step("DimReduction_Clustering.GRNPreprocessing", "STARTED")
+        print("\n[3.1] Running GRN preprocessing pipeline...")
+        adata = perform_grn_pre_processing(
+            adata,
+            cluster_key=cluster_key,  # Will create leiden clustering
+            top_genes=config.HVGS_N_TOP_GENES,
+            n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
+            n_pcs=config.NEIGHBORS_N_PCS,
+        )
+        log_step("DimReduction_Clustering.GRNPreprocessing", "COMPLETED")
+
+        # UMAP for visualization
+        log_step("DimReduction_Clustering.UMAP", "STARTED")
+        print("\n[3.2] Computing UMAP embedding...")
+        sc.tl.umap(adata)
+        print("  ✓ UMAP complete")
+        log_step("DimReduction_Clustering.UMAP", "COMPLETED")
+
+        # Leiden clustering if not already done
+        log_step("DimReduction_Clustering.Leiden", "STARTED")
+        if "leiden" not in adata.obs.columns:
+            print("\n[3.3] Performing Leiden clustering...")
+            sc.tl.leiden(adata, resolution=1.0)
+            n_clusters = len(adata.obs["leiden"].unique())
+            print(f"  ✓ Identified {n_clusters} clusters")
+        else:
+            n_clusters = len(adata.obs["leiden"].unique())
+            print(f"\n[3.3] Using existing Leiden clustering ({n_clusters} clusters)")
+        log_step(
+            "DimReduction_Clustering.Leiden", "COMPLETED", {"n_clusters": n_clusters}
+        )
+
+        # Save checkpoint
+        if log_dir:
+            log_step("DimReduction_Clustering.Checkpoint", "SAVING")
+            adata.write(checkpoint_file)
+            write_checkpoint(
+                log_dir,
+                "clustering",
+                step_hash,
+                n_obs=adata.n_obs,
+                n_vars=adata.n_vars,
+                n_clusters=n_clusters,
+            )
+            log_step(
+                "DimReduction_Clustering.Checkpoint",
+                "SAVED",
+                {"checkpoint_file": checkpoint_file},
+            )
+
+        log_step(
+            "DimReduction_Clustering",
+            "COMPLETED",
+            {"n_obs": adata.n_obs, "n_vars": adata.n_vars, "n_clusters": n_clusters},
+        )
+        return adata
+    except Exception as e:
+        log_error("DimReduction_Clustering", e)
+        raise
 
 
 def celloracle_pipeline(
@@ -707,100 +828,126 @@ def celloracle_pipeline(
     log_dir=None,
 ):
     """Run CellOracle GRN inference pipeline."""
-    print(f"\n{'='*70}")
-    print("STEP 4: CellOracle GRN Inference")
-    print(f"{'='*70}")
-
-    if skip_celloracle:
-        print("⊘ Skipping CellOracle analysis (--skip-celloracle)")
-        return None
-
-    # Check checkpoint for CellOracle
-    step_hash = compute_input_hash(
-        None,
-        n_obs=adata.n_obs,
-        cluster_key=cluster_key,
-        species=species,
-        embedding_name=embedding_name,
+    log_step(
+        "CellOracle",
+        "STARTED",
+        {"n_obs": adata.n_obs, "cluster_key": cluster_key, "species": species},
     )
 
-    oracle_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.oracle"
-    links_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.links"
-
-    if log_dir and check_checkpoint(log_dir, "celloracle", step_hash):
-        if os.path.exists(oracle_file) and os.path.exists(links_file):
-            try:
-                from trnspot.celloracle_processing import load_celloracle_results
-
-                print(f"  Loading CellOracle results from checkpoint...")
-                oracle, links = load_celloracle_results(
-                    oracle_path=oracle_file, links_path=links_file
-                )
-                return oracle, links
-            except Exception as e:
-                print(f"  ⚠ Error loading checkpoint: {e}")
-                print(f"  Re-running CellOracle analysis...")
-
     try:
-        from trnspot.celloracle_processing import (
-            create_oracle_object,
-            run_PCA,
-            run_KNN,
-            run_links,
-            save_celloracle_results,
-        )
+        print(f"\n{'='*70}")
+        print("STEP 4: CellOracle GRN Inference")
+        print(f"{'='*70}")
 
-        print("\n[4.1] Creating Oracle object...")
-        oracle = create_oracle_object(
-            adata,
-            cluster_column_name=cluster_key,
-            embedding_name=embedding_name,
-            raw_count_layer=raw_count_layer,
+        if skip_celloracle:
+            log_step("CellOracle", "SKIPPED", {"reason": "--skip-celloracle"})
+            print("⊘ Skipping CellOracle analysis (--skip-celloracle)")
+            return None
+
+        # Check checkpoint for CellOracle
+        step_hash = compute_input_hash(
+            None,
+            n_obs=adata.n_obs,
+            cluster_key=cluster_key,
             species=species,
-            TG_to_TF_dictionary=TG_to_TF_dictionary,
+            embedding_name=embedding_name,
         )
-        print("  ✓ Oracle object created")
 
-        print("\n[4.2] Running PCA on Oracle object...")
-        oracle, n_comps = run_PCA(oracle)
-        print("  ✓ PCA complete")
+        oracle_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.oracle"
+        links_file = f"{config.OUTPUT_DIR}/celloracle/oracle_object.celloracle.links"
 
-        print("\n[4.3] Running KNN imputation...")
-        oracle = run_KNN(oracle, n_comps=n_comps)
-        print("  ✓ KNN imputation complete")
+        if log_dir and check_checkpoint(log_dir, "celloracle", step_hash):
+            if os.path.exists(oracle_file) and os.path.exists(links_file):
+                try:
+                    from trnspot.celloracle_processing import load_celloracle_results
 
-        print("\n[4.4] Inferring GRN links...")
-        links = run_links(
-            oracle,
-            cluster_column_name=cluster_key,
-            p_cutoff=0.001,
-        )
-        print("  ✓ GRN inference complete")
+                    log_step("CellOracle.Checkpoint", "LOADING")
+                    print(f"  Loading CellOracle results from checkpoint...")
+                    oracle, links = load_celloracle_results(
+                        oracle_path=oracle_file, links_path=links_file
+                    )
+                    log_step("CellOracle.Checkpoint", "LOADED")
+                    return oracle, links
+                except Exception as e:
+                    log_step("CellOracle.Checkpoint", "FAILED", {"error": str(e)})
+                    print(f"  ⚠ Error loading checkpoint: {e}")
+                    print(f"  Re-running CellOracle analysis...")
 
-        print("\n[4.5] Saving CellOracle results...")
-        save_celloracle_results(oracle, links)
-        print("  ✓ CellOracle results saved")
-
-        # Save checkpoint
-        if log_dir:
-            write_checkpoint(
-                log_dir,
-                "celloracle",
-                step_hash,
-                n_obs=adata.n_obs,
-                cluster_key=cluster_key,
+        try:
+            from trnspot.celloracle_processing import (
+                create_oracle_object,
+                run_PCA,
+                run_KNN,
+                run_links,
+                save_celloracle_results,
             )
 
-        return oracle, links
+            log_step("CellOracle.CreateObject", "STARTED")
+            print("\n[4.1] Creating Oracle object...")
+            oracle = create_oracle_object(
+                adata,
+                cluster_column_name=cluster_key,
+                embedding_name=embedding_name,
+                raw_count_layer=raw_count_layer,
+                species=species,
+                TG_to_TF_dictionary=TG_to_TF_dictionary,
+            )
+            print("  ✓ Oracle object created")
+            log_step("CellOracle.CreateObject", "COMPLETED")
 
-    except ImportError:
-        print("\n⚠ CellOracle not installed. Skipping GRN inference.")
-        print("  To install: pip install celloracle")
+            log_step("CellOracle.PCA", "STARTED")
+            print("\n[4.2] Running PCA on Oracle object...")
+            oracle, n_comps = run_PCA(oracle)
+            print("  ✓ PCA complete")
+            log_step("CellOracle.PCA", "COMPLETED", {"n_comps": n_comps})
+
+            log_step("CellOracle.KNN", "STARTED")
+            print("\n[4.3] Running KNN imputation...")
+            oracle = run_KNN(oracle, n_comps=n_comps)
+            print("  ✓ KNN imputation complete")
+            log_step("CellOracle.KNN", "COMPLETED")
+
+            log_step("CellOracle.InferGRN", "STARTED")
+            print("\n[4.4] Inferring GRN links...")
+            links = run_links(
+                oracle,
+                cluster_column_name=cluster_key,
+                p_cutoff=0.001,
+            )
+            print("  ✓ GRN inference complete")
+            log_step("CellOracle.InferGRN", "COMPLETED")
+
+            log_step("CellOracle.SaveResults", "STARTED")
+            print("\n[4.5] Saving CellOracle results...")
+            save_celloracle_results(oracle, links)
+            print("  ✓ CellOracle results saved")
+            log_step("CellOracle.SaveResults", "COMPLETED")
+
+            # Save checkpoint
+            if log_dir:
+                write_checkpoint(
+                    log_dir,
+                    "celloracle",
+                    step_hash,
+                    n_obs=adata.n_obs,
+                    cluster_key=cluster_key,
+                )
+
+            log_step("CellOracle", "COMPLETED")
+            return oracle, links
+
+        except ImportError as ie:
+            log_step("CellOracle", "SKIPPED", {"reason": "CellOracle not installed"})
+            print("\n⚠ CellOracle not installed. Skipping GRN inference.")
+            print("  To install: pip install celloracle")
         return None
     except Exception as e:
         print(f"\n⚠ Error during CellOracle analysis: {e}")
         print("  Continuing with remaining analysis...")
         return None
+    except Exception as e:
+        log_error("CellOracle", e)
+        raise
 
 
 def hotspot_pipeline(
@@ -811,87 +958,123 @@ def hotspot_pipeline(
     log_dir=None,
 ):
     """Run Hotspot gene module identification pipeline."""
-    print(f"\n{'='*70}")
-    print("STEP 5: Hotspot Gene Module Identification")
-    print(f"{'='*70}")
-
-    if skip_hotspot:
-        print("⊘ Skipping Hotspot analysis (--skip-hotspot)")
-        return None
-
-    # Check checkpoint for Hotspot
-    step_hash = compute_input_hash(
-        None,
-        n_obs=adata.n_obs,
-        top_genes=config.HOTSPOT_TOP_GENES,
-        embedding_key=embedding_key,
-        fdr_threshold=config.HOTSPOT_FDR_THRESHOLD,
+    log_step(
+        "Hotspot", "STARTED", {"n_obs": adata.n_obs, "embedding_key": embedding_key}
     )
 
-    hotspot_file = f"{config.OUTPUT_DIR}/hotspot/hotspot_object.pkl"
-    if (
-        log_dir
-        and check_checkpoint(log_dir, "hotspot", step_hash)
-        and os.path.exists(hotspot_file)
-    ):
-        print(f"  Loading Hotspot results from checkpoint...")
-        with open(hotspot_file, "rb") as f:
-            hotspot_obj = pickle.load(f)
-        return hotspot_obj
-
     try:
-        from trnspot.hotspot_processing import (
-            create_hotspot_object,
-            run_hotspot_analysis,
-        )
+        print(f"\n{'='*70}")
+        print("STEP 5: Hotspot Gene Module Identification")
+        print(f"{'='*70}")
 
-        print("\n[5.1] Creating Hotspot object...")
-        hotspot_obj = create_hotspot_object(
-            adata,
+        if skip_hotspot:
+            log_step("Hotspot", "SKIPPED", {"reason": "--skip-hotspot"})
+            print("⊘ Skipping Hotspot analysis (--skip-hotspot)")
+            return None
+
+        # Check checkpoint for Hotspot
+        step_hash = compute_input_hash(
+            None,
+            n_obs=adata.n_obs,
             top_genes=config.HOTSPOT_TOP_GENES,
-            layer_key=layer_key,
-            model="danb",
             embedding_key=embedding_key,
-            normalization_key="n_counts",
+            fdr_threshold=config.HOTSPOT_FDR_THRESHOLD,
         )
-        print("  ✓ Hotspot object created")
 
-        print("\n[5.2] Running Hotspot analysis...")
-        print("  (This may take several minutes...)")
-        hotspot_obj = run_hotspot_analysis(hotspot_obj)
-        print("  ✓ Hotspot analysis complete")
+        hotspot_file = f"{config.OUTPUT_DIR}/hotspot/hotspot_object.pkl"
+        if (
+            log_dir
+            and check_checkpoint(log_dir, "hotspot", step_hash)
+            and os.path.exists(hotspot_file)
+        ):
+            log_step("Hotspot.Checkpoint", "LOADING")
+            print(f"  Loading Hotspot results from checkpoint...")
+            with open(hotspot_file, "rb") as f:
+                hotspot_obj = pickle.load(f)
+            log_step("Hotspot.Checkpoint", "LOADED")
+            return hotspot_obj
 
-        # Get results summary
-        autocorr_results = hotspot_obj.results
-        significant_genes = autocorr_results[
-            autocorr_results.FDR < config.HOTSPOT_FDR_THRESHOLD
-        ]
-
-        print(f"\n  Analysis Summary:")
-        print(f"    Total genes analyzed: {len(autocorr_results)}")
-        print(f"    Significant genes: {len(significant_genes)}")
-
-        if hasattr(hotspot_obj, "modules"):
-            n_modules = len(hotspot_obj.modules.unique())
-            print(f"    Gene modules identified: {n_modules}")
-
-        # Save checkpoint
-        if log_dir:
-            write_checkpoint(
-                log_dir,
-                "hotspot",
-                step_hash,
-                n_genes=len(autocorr_results),
-                n_significant=len(significant_genes),
+        try:
+            from trnspot.hotspot_processing import (
+                create_hotspot_object,
+                run_hotspot_analysis,
             )
 
-        return hotspot_obj
+            log_step("Hotspot.CreateObject", "STARTED")
+            print("\n[5.1] Creating Hotspot object...")
+            hotspot_obj = create_hotspot_object(
+                adata,
+                top_genes=config.HOTSPOT_TOP_GENES,
+                layer_key=layer_key,
+                model="danb",
+                embedding_key=embedding_key,
+                normalization_key="n_counts",
+            )
+            print("  ✓ Hotspot object created")
+            log_step(
+                "Hotspot.CreateObject",
+                "COMPLETED",
+                {"top_genes": config.HOTSPOT_TOP_GENES},
+            )
 
-    except ImportError:
-        print("\n⚠ Hotspot not installed. Skipping module identification.")
-        print("  To install: pip install hotspot-sc")
-        return None
+            log_step("Hotspot.Analysis", "STARTED")
+            print("\n[5.2] Running Hotspot analysis...")
+            print("  (This may take several minutes...)")
+            hotspot_obj = run_hotspot_analysis(hotspot_obj)
+            print("  ✓ Hotspot analysis complete")
+
+            # Get results summary
+            autocorr_results = hotspot_obj.results
+            significant_genes = autocorr_results[
+                autocorr_results.FDR < config.HOTSPOT_FDR_THRESHOLD
+            ]
+
+            print(f"\n  Analysis Summary:")
+            print(f"    Total genes analyzed: {len(autocorr_results)}")
+            print(f"    Significant genes: {len(significant_genes)}")
+
+            n_modules = 0
+            if hasattr(hotspot_obj, "modules"):
+                n_modules = len(hotspot_obj.modules.unique())
+                print(f"    Gene modules identified: {n_modules}")
+
+            log_step(
+                "Hotspot.Analysis",
+                "COMPLETED",
+                {
+                    "total_genes": len(autocorr_results),
+                    "significant_genes": len(significant_genes),
+                    "n_modules": n_modules,
+                },
+            )
+
+            # Save checkpoint
+            if log_dir:
+                write_checkpoint(
+                    log_dir,
+                    "hotspot",
+                    step_hash,
+                    n_genes=len(autocorr_results),
+                    n_significant=len(significant_genes),
+                )
+
+            log_step(
+                "Hotspot",
+                "COMPLETED",
+                {
+                    "total_genes": len(autocorr_results),
+                    "significant_genes": len(significant_genes),
+                },
+            )
+            return hotspot_obj
+
+        except ImportError:
+            log_step("Hotspot", "SKIPPED", {"reason": "Hotspot not installed"})
+            print("\n⚠ Hotspot not installed. Skipping module identification.")
+            print("  To install: pip install hotspot-sc")
+            return None
     except Exception as e:
+        log_error("Hotspot", e)
         print(f"\n⚠ Error during Hotspot analysis: {e}")
         print("  Continuing with remaining analysis...")
         return None
@@ -899,88 +1082,90 @@ def hotspot_pipeline(
 
 def generate_summary(adata, celloracle_result, hotspot_result, start_time, output_dir):
     """Generate analysis summary report."""
-    print(f"\n{'='*70}")
-    print("STEP 6: Generating Analysis Summary")
-    print(f"{'='*70}")
+    log_step("GenerateSummary", "STARTED")
 
-    end_time = datetime.now()
-    duration = end_time - start_time
+    try:
+        print(f"\n{'='*70}")
+        print("STEP 6: Generating Analysis Summary")
+        print(f"{'='*70}")
 
-    summary = []
-    summary.append("=" * 70)
-    summary.append("TRNspot Complete Pipeline - Analysis Summary")
-    summary.append("=" * 70)
-    summary.append(f"\nAnalysis completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    summary.append(f"Total runtime: {duration}")
-    summary.append(f"\n{'='*70}")
-    summary.append("Dataset Information")
-    summary.append("=" * 70)
-    summary.append(f"Final dataset: {adata.n_obs} cells × {adata.n_vars} genes")
+        end_time = datetime.now()
+        duration = end_time - start_time
 
-    if "leiden" in adata.obs.columns:
-        n_clusters = len(adata.obs["leiden"].unique())
-        summary.append(f"Clusters identified: {n_clusters}")
-
-    # CellOracle results
-    summary.append(f"\n{'='*70}")
-    summary.append("CellOracle GRN Inference")
-    summary.append("=" * 70)
-    if celloracle_result:
-        oracle, links = celloracle_result
-        summary.append(f"Status: ✓ Completed")
+        summary = []
+        summary.append("=" * 70)
+        summary.append("TRNspot Complete Pipeline - Analysis Summary")
+        summary.append("=" * 70)
         summary.append(
-            f"Oracle object: {output_dir}/celloracle/oracle_object.celloracle.oracle"
+            f"\nAnalysis completed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        summary.append(f"GRN links: {output_dir}/celloracle/grn_links.celloracle.links")
-    else:
-        summary.append(f"Status: ⊘ Skipped or failed")
+        summary.append(f"Total runtime: {duration}")
+        summary.append(f"\n{'='*70}")
+        summary.append("Dataset Information")
+        summary.append("=" * 70)
+        summary.append(f"Final dataset: {adata.n_obs} cells × {adata.n_vars} genes")
 
-    # Hotspot results
-    summary.append(f"\n{'='*70}")
-    summary.append("Hotspot Module Identification")
-    summary.append("=" * 70)
-    if hotspot_result:
-        autocorr_results = hotspot_result.results
-        significant = autocorr_results[
-            autocorr_results.FDR < config.HOTSPOT_FDR_THRESHOLD
-        ]
-        summary.append(f"Status: ✓ Completed")
-        summary.append(f"Genes analyzed: {len(autocorr_results)}")
-        summary.append(f"Significant genes: {len(significant)}")
-        if hasattr(hotspot_result, "modules"):
-            n_modules = len(hotspot_result.modules.unique())
-            summary.append(f"Modules identified: {n_modules}")
-        summary.append(f"Results: {output_dir}/hotspot/")
-    else:
-        summary.append(f"Status: ⊘ Skipped or failed")
+        if "leiden" in adata.obs.columns:
+            n_clusters = len(adata.obs["leiden"].unique())
+            summary.append(f"Clusters identified: {n_clusters}")
 
-    # Output files
-    summary.append(f"\n{'='*70}")
-    summary.append("Output Files")
-    summary.append("=" * 70)
-    summary.append(f"Preprocessed data: {output_dir}/preprocessed_adata.h5ad")
-    summary.append(f"Figures directory: {config.FIGURES_DIR}/")
-    summary.append(f"Results directory: {output_dir}/")
+        # CellOracle results
+        summary.append(f"\n{'='*70}")
+        summary.append("CellOracle GRN Inference")
+        summary.append("=" * 70)
+        if celloracle_result:
+            oracle, links = celloracle_result
+            summary.append(f"Status: ✓ Completed")
+            summary.append(
+                f"Oracle object: {output_dir}/celloracle/oracle_object.celloracle.oracle"
+            )
+            summary.append(
+                f"GRN links: {output_dir}/celloracle/grn_links.celloracle.links"
+            )
+        else:
+            summary.append(f"Status: ⊘ Skipped or failed")
 
-    # summary.append(f"\n{'='*70}")
-    # summary.append("Next Steps")
-    # summary.append("=" * 70)
-    # summary.append("1. Explore cell clusters and marker genes")
-    # summary.append("2. Analyze gene regulatory networks (CellOracle results)")
-    # summary.append("3. Examine gene modules and their functions (Hotspot results)")
-    # summary.append("4. Perform downstream analysis (GO enrichment, pathway analysis)")
-    # summary.append("5. Generate publication-quality visualizations")
+        # Hotspot results
+        summary.append(f"\n{'='*70}")
+        summary.append("Hotspot Module Identification")
+        summary.append("=" * 70)
+        if hotspot_result:
+            autocorr_results = hotspot_result.results
+            significant = autocorr_results[
+                autocorr_results.FDR < config.HOTSPOT_FDR_THRESHOLD
+            ]
+            summary.append(f"Status: ✓ Completed")
+            summary.append(f"Genes analyzed: {len(autocorr_results)}")
+            summary.append(f"Significant genes: {len(significant)}")
+            if hasattr(hotspot_result, "modules"):
+                n_modules = len(hotspot_result.modules.unique())
+                summary.append(f"Modules identified: {n_modules}")
+            summary.append(f"Results: {output_dir}/hotspot/")
+        else:
+            summary.append(f"Status: ⊘ Skipped or failed")
 
-    summary_text = "\n".join(summary)
-    print("\n" + summary_text)
+        # Output files
+        summary.append(f"\n{'='*70}")
+        summary.append("Output Files")
+        summary.append("=" * 70)
+        summary.append(f"Preprocessed data: {output_dir}/preprocessed_adata.h5ad")
+        summary.append(f"Figures directory: {config.FIGURES_DIR}/")
+        summary.append(f"Results directory: {output_dir}/")
 
-    # Save summary to file
-    summary_path = f"{output_dir}/analysis_summary.txt"
-    with open(summary_path, "w") as f:
-        f.write(summary_text)
-    print(f"\n✓ Summary saved to: {summary_path}")
+        summary_text = "\n".join(summary)
+        print("\n" + summary_text)
 
-    return summary_text
+        # Save summary to file
+        summary_path = f"{output_dir}/analysis_summary.txt"
+        with open(summary_path, "w") as f:
+            f.write(summary_text)
+        print(f"\n✓ Summary saved to: {summary_path}")
+
+        log_step("GenerateSummary", "COMPLETED", {"summary_file": summary_path})
+        return summary_text
+    except Exception as e:
+        log_error("GenerateSummary", e)
+        raise
 
 
 def track_files(output_dir):
@@ -1043,8 +1228,8 @@ Examples:
   # Skip specific analyses
   python complete_pipeline.py --skip-celloracle --skip-hotspot
   
-  # Run stratified analysis in parallel
-  python complete_pipeline.py --cluster-key-stratification celltype --parallel
+  # Run stratified analysis
+  python complete_pipeline.py --cluster-key-stratification celltype
   
   # Run specific steps only
   python complete_pipeline.py --steps load preprocessing clustering
@@ -1092,6 +1277,12 @@ Examples:
         help="Clustering column name (default: leiden)",
     )
     parser.add_argument(
+        "--clusters",
+        type=str,
+        default="all",
+        help="Specific clusters to analyze (comma-separated, default: all)",
+    )
+    parser.add_argument(
         "--cluster-key-stratification",
         type=str,
         default=None,
@@ -1106,8 +1297,8 @@ Examples:
     parser.add_argument(
         "--embedding-hotspot",
         type=str,
-        default="X_umap",
-        help="Embedding name for Hotspot analysis (default: X_umap)",
+        default="X_pca",
+        help="Embedding name for Hotspot analysis (default: X_pca)",
     )
     parser.add_argument(
         "--raw-count-layer",
@@ -1176,12 +1367,6 @@ Examples:
         help="Enable debug mode",
     )
     parser.add_argument(
-        "--parallel",
-        action="store_true",
-        default=False,
-        help="Run stratified analyses in parallel (requires stratification)",
-    )
-    parser.add_argument(
         "--steps",
         nargs="+",
         default=None,
@@ -1209,6 +1394,14 @@ Examples:
         output_dir=args.output,
         figures_dir=os.path.join(args.output, "figures"),
         debug=args.debug,
+    )
+
+    # Initialize logging system
+    setup_logging(args.output)
+    log_step(
+        "Pipeline Initialization",
+        "STARTED",
+        {"output_dir": args.output, "random_seed": args.seed, "n_jobs": args.n_jobs},
     )
 
     # Set random seed and scanpy settings
@@ -1246,15 +1439,45 @@ Examples:
         print("\nNon-default arguments:")
         for arg_info in non_default_args:
             print(arg_info)
+        log_step(
+            "Pipeline Initialization",
+            "NON_DEFAULT_ARGS",
+            {
+                "args": ", ".join(
+                    [
+                        f"{k}={v}"
+                        for k, v in [
+                            (arg.split(": ")[0].strip(), arg.split(": ")[1])
+                            for arg in non_default_args
+                        ]
+                    ]
+                )
+            },
+        )
     else:
         print("\nAll arguments using default values")
 
+    log_step("Pipeline Initialization", "COMPLETED")
+
     try:
         # Create pipeline controller
+        log_step("Controller Creation", "STARTED")
         controller = PipelineController(args, start_time)
+        log_step("Controller Creation", "COMPLETED")
 
         # Run pipeline
-        controller.run_complete_pipeline(steps=args.steps, parallel=args.parallel)
+        log_step(
+            "Pipeline Execution",
+            "STARTED",
+            {"steps": args.steps if args.steps else "all"},
+        )
+
+        controller.run_complete_pipeline(steps=args.steps)
+
+        log_step("Pipeline Execution", "COMPLETED")
+        log_step(
+            "PIPELINE", "SUCCESS", {"total_duration": str(datetime.now() - start_time)}
+        )
 
         return 0
 
@@ -1262,7 +1485,14 @@ Examples:
         print(f"\n{'='*70}")
         print(f"Pipeline failed with error: {e}")
         print(f"{'='*70}\n")
-        import traceback
+
+        # Log the error
+        log_error("Pipeline Execution", e)
+        log_step(
+            "PIPELINE",
+            "FAILED",
+            {"error": str(e), "duration": str(datetime.now() - start_time)},
+        )
 
         traceback.print_exc()
         return 1

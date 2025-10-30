@@ -9,9 +9,11 @@ from adjustText import adjust_text
 import networkx as nx
 import pandas as pd
 import marsilea as ma
-from . import config
+
 from itertools import combinations
 import numpy as np
+
+from . import config
 
 
 def plot_heatmap_single_score(
