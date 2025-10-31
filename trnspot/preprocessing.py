@@ -304,105 +304,63 @@ def perform_normalization(adata: AnnData) -> AnnData:
     return adata_cc
 
 
-# %%
-
-
-def perform_grn_pre_processing(
+def perform_dimensionality_reduction_clustering(
     adata: AnnData,
-    cluster_key: str,
-    cell_downsample: int = 20000,
-    top_genes: Optional[int] = None,
-    n_neighbors: Optional[int] = None,
-    n_pcs: Optional[int] = None,
-    svd_solver: Optional[str] = None,
 ) -> AnnData:
     """
-    Perform preprocessing for GRN analysis on AnnData object.
+    Perform dimensionality reduction and clustering on AnnData object.
 
-    This function performs QC, normalizes the data, identifies highly variable genes,
-    and scales the data in preparation for gene regulatory network analysis.
+    This function computes PCA, constructs a neighborhood graph, computes UMAP embedding,
+    and performs clustering using the Leiden algorithm.
 
     Parameters
     ----------
     adata : AnnData
         Annotated data matrix with cells as observations and genes as variables.
-    cluster_key : str, optional
-        Key in adata.obs to use for clustering over GRN.
-    cell_downsample : int, default=20000
-        Number of cells to downsample to (default: 20000).
-    top_genes : int, optional
-        Number of highly variable genes to select.
-        If None, uses config.HVGS_N_TOP_GENES (default: 2000).
-    n_neighbors : int, optional
-        Number of neighbors for KNN graph.
-        If None, uses config.NEIGHBORS_N_NEIGHBORS (default: 15).
-    n_pcs : int, optional
-        Number of principal components to use.
-        If None, uses config.NEIGHBORS_N_PCS (default: 40).
-    svd_solver : str, optional
-        SVD solver for PCA.
-        If None, uses config.PCA_SVDSOLVE (default: 'arpack').
+    n_pcs : int
+        Number of principal components to compute. Default is config.PCA_N_COMPONENTS (50).
+    n_neighbors : int
+        Number of neighbors for constructing the neighborhood graph. Default is config.NEIGHBORS_N_NEIGHBORS (15).
+    resolution : float
+        Resolution parameter for Leiden clustering. Default is config.CLUSTERING_RESOLUTION (1.0).
 
     Returns
     -------
-    adata : AnnData
-        Preprocessed AnnData object ready for GRN analysis.
-
-    Examples
-    --------
-    >>> import scanpy as sc
-    >>> from trnspot.preprocessing import perform_grn_pre_processing
-    >>> from trnspot import config
-    >>>
-    >>> # Use default config values
-    >>> adata = sc.read_h5ad('data.h5ad')
-    >>> adata_preprocessed = perform_grn_pre_processing(adata, cluster_key='louvain')
-    >>>
-    >>> # Override specific parameters
-    >>> adata_preprocessed = perform_grn_pre_processing(adata, top_genes=5000, n_pcs=50)
+    AnnData
+        Annotated data matrix with PCA and clustering results.
     """
-
-    # Use config defaults if not specified
-    if top_genes is None:
-        top_genes = config.HVGS_N_TOP_GENES
-    if n_neighbors is None:
-        n_neighbors = config.NEIGHBORS_N_NEIGHBORS
-    if n_pcs is None:
-        n_pcs = config.NEIGHBORS_N_PCS
-    if svd_solver is None:
-        svd_solver = config.PCA_SVDSOLVE
-
-    # Make a copy to avoid modifying the original
+    print("\nPerforming dimensionality reduction and clustering...")
     adata_cc = adata.copy()
 
-    # Filter genes based on variance and subset
-    sc.pp.highly_variable_genes(adata_cc, n_top_genes=top_genes, subset=True)
-    print(f"  Selected {top_genes} highly variable genes")
+    sc.pp.highly_variable_genes(
+        adata_cc,
+        n_top_genes=config.HVGS_N_TOP_GENES,
+        subset=False,
+    )
+    print(f"Identified top {config.HVGS_N_TOP_GENES} highly variable genes")
 
     # PCA
-    sc.tl.pca(adata_cc, svd_solver=svd_solver)
-    print(f"  Computed PCA with {svd_solver} solver")
+    sc.pp.pca(adata_cc, n_comps=config.PCA_N_COMPS, svd_solver=config.PCA_SVDSOLVE)
+    print(f"Computed PCA with {config.PCA_N_COMPS} components")
 
-    # Diffusion map
-    sc.pp.neighbors(adata_cc, n_neighbors=n_neighbors, n_pcs=n_pcs)
-    sc.tl.diffmap(adata_cc)
-    print(f"  Computed diffusion map with {n_neighbors} neighbors and {n_pcs} PCs")
+    # Neighborhood graph
+    sc.pp.neighbors(
+        adata_cc,
+        metric=config.NEIGHBORS_METRIC,
+        method=config.NEIGHBORS_METHOD,
+        n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
+        n_pcs=config.NEIGHBORS_N_PCS,
+    )
+    print(
+        f"Constructed neighborhood graph with {config.NEIGHBORS_N_NEIGHBORS} neighbors"
+    )
 
-    # Calculate neighbors again based on diffusion map
-    sc.pp.neighbors(adata_cc, n_neighbors=n_neighbors, use_rep="X_diffmap")
-    print(f"  Recomputed neighbors using diffusion map representation")
+    # UMAP
+    sc.tl.umap(adata_cc)
+    print("Computed UMAP embedding")
 
     # Clustering
-    sc.tl.paga(adata_cc, groups=cluster_key)
-    sc.pl.paga(adata_cc, show=None, save=None)
-    print(f"  Computed PAGA for cluster key: {cluster_key}")
-
-    sc.tl.draw_graph(adata_cc, init_pos="paga")
-    sc.pl.draw_graph(adata_cc, color=cluster_key, show=None, save=None)
-    print(f"  Computed draw_graph for cluster key: {cluster_key}")
-
-    if adata_cc.n_obs > cell_downsample:
-        print(f"  Downsampling to {cell_downsample} cells for GRN analysis")
-        sc.pp.subsample(adata_cc, n_obs=cell_downsample)
+    sc.tl.leiden(adata_cc, resolution=config.LEIDEN_RESOLUTION)
+    print(f"Performed Leiden clustering with resolution {config.LEIDEN_RESOLUTION}")
 
     return adata_cc

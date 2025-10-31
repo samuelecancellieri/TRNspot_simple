@@ -150,7 +150,7 @@ def run_hotspot_analysis(hotspot_obj):
         core_only=config.HOTSPOT_CORE_ONLY,
         fdr_threshold=config.HOTSPOT_FDR_THRESHOLD,
     )
-    print(f"  Identified {len(modules)} gene modules")
+    print(f"  Identified {len(modules.unique())} gene modules")
 
     module_scores = hotspot_obj.calculate_module_scores()
     print("  Module scores calculated")

@@ -33,7 +33,7 @@ from trnspot import set_random_seed, set_scanpy_settings, config
 from trnspot.preprocessing import (
     perform_qc,
     perform_normalization,
-    perform_grn_pre_processing,
+    perform_dimensionality_reduction_clustering,
 )
 
 
@@ -725,11 +725,11 @@ def dimensionality_reduction_clustering(adata, cluster_key="leiden", log_dir=Non
         {"n_obs": adata.n_obs, "n_vars": adata.n_vars, "cluster_key": cluster_key},
     )
 
-    try:
-        print(f"\n{'='*70}")
-        print("STEP 3: Dimensionality Reduction and Clustering")
-        print(f"{'='*70}")
+    print(f"\n{'='*70}")
+    print("STEP 3: Dimensionality Reduction and Clustering")
+    print(f"{'='*70}")
 
+    try:
         # Check checkpoint for clustering
         step_hash = compute_input_hash(
             None,
@@ -755,38 +755,14 @@ def dimensionality_reduction_clustering(adata, cluster_key="leiden", log_dir=Non
             print(f"  Loading clustered data from: {checkpoint_file}")
             return sc.read_h5ad(checkpoint_file)
 
-        # GRN preprocessing (includes HVG, PCA, diffusion map, PAGA)
-        log_step("DimReduction_Clustering.GRNPreprocessing", "STARTED")
-        print("\n[3.1] Running GRN preprocessing pipeline...")
-        adata = perform_grn_pre_processing(
-            adata,
-            cluster_key=cluster_key,  # Will create leiden clustering
-            top_genes=config.HVGS_N_TOP_GENES,
-            n_neighbors=config.NEIGHBORS_N_NEIGHBORS,
-            n_pcs=config.NEIGHBORS_N_PCS,
-        )
-        log_step("DimReduction_Clustering.GRNPreprocessing", "COMPLETED")
+        # Perform dimensionality reduction and clustering
+        log_step("DimReduction_Clustering.Processing", "STARTED")
+        adata = perform_dimensionality_reduction_clustering(adata)
+        log_step("DimReduction_Clustering.Processing", "COMPLETED")
 
-        # UMAP for visualization
-        log_step("DimReduction_Clustering.UMAP", "STARTED")
-        print("\n[3.2] Computing UMAP embedding...")
-        sc.tl.umap(adata)
-        print("  ✓ UMAP complete")
-        log_step("DimReduction_Clustering.UMAP", "COMPLETED")
-
-        # Leiden clustering if not already done
-        log_step("DimReduction_Clustering.Leiden", "STARTED")
-        if "leiden" not in adata.obs.columns:
-            print("\n[3.3] Performing Leiden clustering...")
-            sc.tl.leiden(adata, resolution=1.0)
-            n_clusters = len(adata.obs["leiden"].unique())
-            print(f"  ✓ Identified {n_clusters} clusters")
-        else:
-            n_clusters = len(adata.obs["leiden"].unique())
-            print(f"\n[3.3] Using existing Leiden clustering ({n_clusters} clusters)")
-        log_step(
-            "DimReduction_Clustering.Leiden", "COMPLETED", {"n_clusters": n_clusters}
-        )
+        # Get cluster count
+        n_clusters = len(adata.obs["leiden"].unique())
+        print(f"✓ Identified {n_clusters} clusters")
 
         # Save checkpoint
         if log_dir:
@@ -875,6 +851,7 @@ def celloracle_pipeline(
 
         try:
             from trnspot.celloracle_processing import (
+                perform_grn_pre_processing,
                 create_oracle_object,
                 run_PCA,
                 run_KNN,
@@ -882,8 +859,16 @@ def celloracle_pipeline(
                 save_celloracle_results,
             )
 
+            log_step("CellOracle.Preprocessing", "STARTED")
+            print("\n[4.1] Preprocessing data for CellOracle...")
+            adata = perform_grn_pre_processing(
+                adata,
+                cluster_key=cluster_key,
+            )
+            print("  ✓ Preprocessing complete")
+
             log_step("CellOracle.CreateObject", "STARTED")
-            print("\n[4.1] Creating Oracle object...")
+            print("\n[4.2] Creating Oracle object...")
             oracle = create_oracle_object(
                 adata,
                 cluster_column_name=cluster_key,
@@ -896,19 +881,19 @@ def celloracle_pipeline(
             log_step("CellOracle.CreateObject", "COMPLETED")
 
             log_step("CellOracle.PCA", "STARTED")
-            print("\n[4.2] Running PCA on Oracle object...")
+            print("\n[4.3] Running PCA on Oracle object...")
             oracle, n_comps = run_PCA(oracle)
             print("  ✓ PCA complete")
             log_step("CellOracle.PCA", "COMPLETED", {"n_comps": n_comps})
 
             log_step("CellOracle.KNN", "STARTED")
-            print("\n[4.3] Running KNN imputation...")
+            print("\n[4.4] Running KNN imputation...")
             oracle = run_KNN(oracle, n_comps=n_comps)
             print("  ✓ KNN imputation complete")
             log_step("CellOracle.KNN", "COMPLETED")
 
             log_step("CellOracle.InferGRN", "STARTED")
-            print("\n[4.4] Inferring GRN links...")
+            print("\n[4.5] Inferring GRN links...")
             links = run_links(
                 oracle,
                 cluster_column_name=cluster_key,
@@ -918,7 +903,7 @@ def celloracle_pipeline(
             log_step("CellOracle.InferGRN", "COMPLETED")
 
             log_step("CellOracle.SaveResults", "STARTED")
-            print("\n[4.5] Saving CellOracle results...")
+            print("\n[4.6] Saving CellOracle results...")
             save_celloracle_results(oracle, links)
             print("  ✓ CellOracle results saved")
             log_step("CellOracle.SaveResults", "COMPLETED")
@@ -953,7 +938,7 @@ def celloracle_pipeline(
 def hotspot_pipeline(
     adata,
     layer_key="raw_counts",
-    embedding_key="X_umap",
+    embedding_key="X_pca",
     skip_hotspot=False,
     log_dir=None,
 ):
