@@ -1,3 +1,4 @@
+import pickle
 import scanpy as sc
 from scipy import cluster
 import seaborn as sns
@@ -14,6 +15,173 @@ from itertools import combinations
 import numpy as np
 
 from . import config
+
+
+def _plot_network_graph_single_score(
+    graph: nx.DiGraph,
+    cluster: str,
+    stratification: str,
+    score: str,
+    node_size_factor: float = 1000.0,
+    edge_width_factor: float = 1.0,
+):
+    """
+    Plot a network graph using networkx and matplotlib for a single score.
+
+    Args:
+        graph (nx.DiGraph): The directed graph to plot.
+        cluster (str): The cluster name for labeling.
+        stratification (str): The stratification name for labeling.
+        score (str): The score to visualize.
+        node_size_factor (float): Factor to scale node sizes.
+        edge_width_factor (float): Factor to scale edge widths.
+    Returns:
+        None
+    """
+
+    plt.figure(figsize=config.PLOT_FIGSIZE_WIDE)
+
+    pos = nx.spring_layout(graph, seed=42)  # positions for all nodes
+
+    # Node sizes based on degree
+    degrees = dict(graph.degree())
+    node_sizes = [degrees[node] * node_size_factor for node in graph.nodes()]
+
+    # Edge widths based on weight
+    edge_weights = nx.get_edge_attributes(graph, "weight")
+    edge_widths = [
+        edge_weights[edge] * edge_width_factor if edge in edge_weights else 1.0
+        for edge in graph.edges()
+    ]
+
+    nx.draw_networkx_nodes(
+        graph,
+        pos,
+        node_size=node_sizes,
+        node_color="skyblue",
+        alpha=0.7,
+        edgecolors="black",
+    )
+    nx.draw_networkx_edges(
+        graph,
+        pos,
+        width=edge_widths,
+        alpha=0.5,
+        arrows=True,
+        arrowstyle="-|>",
+        arrowsize=10,
+    )
+    nx.draw_networkx_labels(graph, pos, font_size=8)
+
+    plt.title(
+        f"Gene Regulatory Network - Cluster: {cluster}, Stratification: {stratification}, Score: {score}"
+    )
+    plt.axis("off")
+    plt.tight_layout()
+    plt.savefig(
+        f"{config.FIGURES_DIR_GRN}/grn_network_{score}_{stratification}_{cluster}.png",
+        dpi=config.SAVE_DPI,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+    return 0
+
+
+def plot_network_graph(
+    score_df: pd.DataFrame,
+    links_df: pd.DataFrame,
+    scores: list[str] = [
+        "degree_all",
+        "degree_centrality_all",
+        "degree_in",
+        "degree_centrality_in",
+        "degree_out",
+        "degree_centrality_out",
+        "betweenness_centrality",
+        "eigenvector_centrality",
+    ],
+):
+    """
+    Plot network graphs for multiple scores.
+    Args:
+        score_df (pd.DataFrame): DataFrame containing scores.
+        links_df (pd.DataFrame): DataFrame containing links.
+        scores (list[str]): List of scores to plot.
+    Returns:
+        None
+    """
+
+    for score in scores:
+        top_genes_by_cluster = pd.DataFrame()
+        filtered_links_df = pd.DataFrame()
+        for cluster in score_df["cluster"].unique():
+            cluster_scores = score_df.query(f"cluster == '{cluster}'").copy()
+            percentile = np.percentile(cluster_scores[score], 90)
+            cluster_scores = cluster_scores.query(f"{score} > {percentile}")
+            cluster_scores["gene"] = cluster_scores.index
+            top_genes_by_cluster = pd.concat(
+                [top_genes_by_cluster, cluster_scores], axis=0
+            )
+
+            filtered_links_cluster = links_df[links_df["cluster"] == cluster]
+            filtered_links_cluster = filtered_links_cluster[
+                filtered_links_cluster["source"].isin(
+                    top_genes_by_cluster.query("cluster==@cluster")["gene"]
+                )
+            ]
+            filtered_links_cluster["cluster"] = cluster
+            filtered_links_cluster = filtered_links_cluster.nlargest(20, "coef_abs")
+            filtered_links_df = pd.concat(
+                [filtered_links_df, filtered_links_cluster], axis=0
+            )
+
+        top_genes_by_cluster = top_genes_by_cluster.reset_index(drop=True)
+        filtered_links_df = filtered_links_df.reset_index(drop=True)
+
+        graph = nx.from_pandas_edgelist(
+            filtered_links_df,
+            source="source",
+            target="target",
+            create_using=nx.Graph(),
+        )
+
+        components = nx.connected_components(graph)
+        largest_component = max(components, key=len)
+        H = graph.subgraph(largest_component)
+
+        node_score = pd.DataFrame()
+        for node in H.nodes():
+            node_scores = score_df.query("index == @node")
+            node_scores = node_scores.nlargest(1, score)
+            node_scores["gene"] = node_scores.index
+            node_score = pd.concat([node_score, node_scores], axis=0)
+        node_score = node_score.reset_index(drop=True)
+
+    return 0
+
+
+def process_single_links_file(
+    links_file: str,
+) -> pd.DataFrame:
+    """
+    Read a links pickle file and return a DataFrame.
+
+    Args:
+        links_file (str): Path to the links file.
+    Returns:
+        pd.DataFrame: DataFrame constructed from the links file.
+    """
+    links_df = pd.DataFrame()
+    links_pickle = open(links_file, "rb")
+    links_pickle = pickle.load(links_pickle)
+
+    for key in links_pickle.keys():
+        df_tmp = pd.DataFrame(links_pickle[key])
+        df_tmp["cluster"] = key
+        links_df = pd.concat([links_df, df_tmp], axis=0)
+
+    return links_df
 
 
 def plot_heatmap_single_score(

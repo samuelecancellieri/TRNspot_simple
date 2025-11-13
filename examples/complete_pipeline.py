@@ -336,13 +336,13 @@ class PipelineController:
             log_error("Controller.Hotspot", e)
             raise
 
-    def run_step_grn_analysis(self, grn_score_path):
+    def run_step_grn_analysis(self, grn_score_path, grn_links_path):
         """Execute Step 6: GRN Deep Analysis."""
         log_step(
             "Controller.GRNAnalysis", "STARTED", {"grn_score_path": grn_score_path}
         )
         try:
-            result = grn_deep_analysis_pipeline(grn_score_path)
+            result = grn_deep_analysis_pipeline(grn_score_path, grn_links_path)
             log_step("Controller.GRNAnalysis", "COMPLETED")
             return result
         except Exception as e:
@@ -487,8 +487,11 @@ class PipelineController:
                 grn_score_file = os.path.join(
                     self.args.output, "celloracle", "grn_merged_scores.csv"
                 )
-                if os.path.exists(grn_score_file):
-                    self.run_step_grn_analysis(grn_score_file)
+                grn_links_file = os.path.join(
+                    self.args.output, "celloracle", "grn_filtered_links.pkl"
+                )
+                if os.path.exists(grn_score_file) and os.path.exists(grn_links_file):
+                    self.run_step_grn_analysis(grn_score_file, grn_links_file)
 
         # Final summary
         if "summary" in steps:
@@ -1171,13 +1174,15 @@ def track_files(output_dir):
     return tracked_files
 
 
-def grn_deep_analysis_pipeline(grn_score_path):
+def grn_deep_analysis_pipeline(grn_score_path, grn_links_path):
     """Run GRN deep analysis using tracked output files."""
     from trnspot.grn_deep_analysis import (
         process_single_score_file,
+        process_single_links_file,
         plot_scatter_scores,
         plot_compare_cluster_scores,
         plot_difference_cluster_scores,
+        plot_network_graph,
     )
 
     print(f"\n{'='*70}")
@@ -1189,12 +1194,16 @@ def grn_deep_analysis_pipeline(grn_score_path):
 
     score_df = process_single_score_file(grn_score_path)
     print("  ✓ Processed GRN score file")
+    links_df = process_single_links_file(grn_links_path)
+    print("  ✓ Processed GRN links file")
     plot_compare_cluster_scores(score_df)
     print("  ✓ Generated cluster comparison plots")
     plot_difference_cluster_scores(score_df)
     print("  ✓ Generated cluster difference plots")
     plot_scatter_scores(score_df)
     print("  ✓ Generated scatter plots")
+    plot_network_graph(score_df, links_df)
+    print("  ✓ Generated GRN network graph")
 
 
 def main():
