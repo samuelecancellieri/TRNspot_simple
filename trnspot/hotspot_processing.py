@@ -10,8 +10,141 @@ from scipy.sparse import csc_matrix
 import matplotlib.pyplot as plt
 from anndata import AnnData
 import pickle
+import pandas as pd
+import seaborn as sns
+import marsilea as ma
 
 from . import config
+
+from . import enrichment_analysis as ea
+
+
+def plot_hotspot_annotation(hs_obj: hs.Hotspot):
+    """
+    Plot Hotspot gene module annotations on spatial coordinates.
+
+    Parameters:
+        hs_obj (hs.Hotspot): An instance of the Hotspot class containing analysis results.
+
+    """
+
+    print("Generating Hotspot local correlation heatmap with annotations...")
+
+    df_enrichment = pd.DataFrame()
+    for module in hs_obj.modules.unique():
+        genes = hs_obj.modules[hs_obj.modules == module].index.tolist()
+        df_module_enrichment = ea.gseapy_ora_enrichment_analysis(genes).results
+        df_module_enrichment.columns = [
+            x.replace(" ", "_") for x in df_module_enrichment.columns
+        ]
+        df_module_enrichment["module"] = module
+        df_enrichment = pd.concat([df_enrichment, df_module_enrichment])
+    df_enrichment.to_csv(
+        f"{config.OUTPUT_DIR}/hotspot/hotspot_module_enrichment_results.csv",
+        index=False,
+    )
+
+    row_colors = None
+    colors = list(plt.get_cmap("tab10").colors)
+    module_colors = {i: colors[(i - 1) % len(colors)] for i in hs_obj.modules.unique()}
+    module_colors[-1] = "#ffffff"
+
+    row_colors1 = pd.Series(
+        [module_colors[i] for i in hs_obj.modules],
+        index=hs_obj.local_correlation_z.index,
+    )
+
+    row_colors = pd.DataFrame(
+        {
+            "Modules": row_colors1,
+        }
+    )
+    # Get top 3 annotations for each module
+    module_annotations = {}
+    for module in df_enrichment["module"].unique():
+        if module == -1:  # Skip unassigned genes
+            continue
+        module_df = df_enrichment[df_enrichment["module"] == module]
+        if not module_df.empty:
+            top3 = module_df.nlargest(3, "Combined_Score")["Term"].tolist()
+            module_annotations[module] = "; ".join(top3[:3])
+        else:
+            module_annotations[module] = "No enrichment"
+
+    # Create annotation labels for genes based on their module
+    gene_annotations = pd.Series(
+        [module_annotations.get(i, "") if i != -1 else "" for i in hs_obj.modules],
+        index=hs_obj.local_correlation_z.index,
+        name="Top_Annotations",
+    )
+
+    row_colors["Top_Annotations"] = gene_annotations
+
+    # Add heatmap with custom parameters
+
+    heatmap = ma.Heatmap(
+        data=hs_obj.local_correlation_z,
+        cmap="RdBu_r",
+        vmin=-8,
+        vmax=8,
+        rasterized=True,
+    )
+
+    # Add row colors as chunks
+    heatmap.add_left(
+        ma.plotter.Chunk(
+            row_colors["Modules"],
+            label="Modules",
+            size=0.3,
+        )
+    )
+
+    # Add module annotations as labels
+    # Create a mapping of unique modules to their annotations
+    unique_modules = hs_obj.modules.unique()
+    module_to_annotation = {}
+    for module in unique_modules:
+        if module != -1 and module in module_annotations:
+            module_to_annotation[module] = module_annotations[module]
+
+    # Get the module for each gene and create labels
+    gene_module_labels = []
+    for gene_idx, module in enumerate(hs_obj.modules):
+        if module in module_to_annotation:
+            gene_module_labels.append(module_to_annotation[module])
+        else:
+            gene_module_labels.append("")
+
+    heatmap.add_left(
+        ma.plotter.Labels(
+            gene_module_labels,
+            align="left",
+            fontsize=6,
+        ),
+        size=3,
+        pad=0.1,
+    )
+
+    # Set custom linkage for rows and columns
+    heatmap.add_dendrogram(
+        side="left",
+        linkage=hs_obj.linkage,
+        rasterized=True,
+        add_meta=False,
+        show=False,
+    )
+    heatmap.add_dendrogram(
+        side="top",
+        linkage=hs_obj.linkage,
+        rasterized=True,
+        add_meta=False,
+    )
+
+    # Render the plot
+    heatmap.save(
+        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.png",
+        dpi=300,
+    )
 
 
 def save_hotspot_results(
@@ -22,7 +155,6 @@ def save_hotspot_results(
 
     Parameters:
         hotspot_obj (hs.Hotspot): An instance of the Hotspot class containing analysis results.
-        output_dir (str): Directory where results will be saved.
 
     """
     # Get results summary
@@ -159,6 +291,8 @@ def run_hotspot_analysis(hotspot_obj):
     hotspot_obj.plot_local_correlations()
     plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
     plt.close()
+
+    # plot_hotspot_annotation(hotspot_obj)
 
     save_hotspot_results(hotspot_obj)
 

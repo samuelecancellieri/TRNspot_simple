@@ -236,7 +236,12 @@ def plot_heatmap_single_score(
     )
 
     # Plot heatmap
-    fig, ax = plt.subplots(figsize=config.PLOT_FIGSIZE_SQUARED_LARGE)
+    n_genes = len(pivot_top.index)
+    n_strats = len(pivot_top.columns)
+    fig_width = max(8, n_strats * 0.8)
+    fig_height = max(6, n_genes * 0.3)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
     sns.heatmap(
         pivot_top,
         annot=False,
@@ -444,8 +449,8 @@ def plot_scatter_scores(
                 plt_show=False,
             )
 
-            cluster1_clean = cluster1.replace(" ", "_").strip()
-            cluster2_clean = cluster2.replace(" ", "_").strip()
+            cluster1_clean = str(cluster1).replace(" ", "_").strip()
+            cluster2_clean = str(cluster2).replace(" ", "_").strip()
             plot_t.axes[0].grid(False)
             sns.despine(ax=plot_t.axes[0])
 
@@ -638,12 +643,17 @@ def plot_compare_cluster_scores(
 
     # For each score, create barplots showing top 10 genes per cluster for each stratification
     for score in scores:
+        n_clusters = len(clusters)
+        n_cols = int(np.ceil(np.sqrt(n_clusters)))
+        n_rows = int(np.ceil(n_clusters / n_cols))
+
         fig, axes = plt.subplots(
-            nrows=1,
-            ncols=len(clusters),
-            figsize=(7 * len(clusters), 7),
+            nrows=n_rows,
+            ncols=n_cols,
+            figsize=(7 * n_cols, 7 * n_rows),
             squeeze=False,
         )
+        axes = axes.flatten()
 
         for idx, cluster in enumerate(clusters):
             cluster_data = score_df[score_df["cluster"] == cluster]
@@ -652,7 +662,7 @@ def plot_compare_cluster_scores(
             top10_genes = cluster_data.nlargest(10, score)
 
             # Plot barplot
-            ax = axes[0, idx]
+            ax = axes[idx]
             sns.scatterplot(
                 data=top10_genes,
                 x=score,

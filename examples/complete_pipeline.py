@@ -401,8 +401,11 @@ class PipelineController:
         grn_score_file = os.path.join(
             stratified_output_dir, "celloracle", "grn_merged_scores.csv"
         )
-        if os.path.exists(grn_score_file):
-            grn_deep_analysis_pipeline(grn_score_file)
+        grn_links_file = os.path.join(
+            stratified_output_dir, "celloracle", "grn_filtered_links.pkl"
+        )
+        if os.path.exists(grn_score_file) and os.path.exists(grn_links_file):
+            grn_deep_analysis_pipeline(grn_score_file, grn_links_file)
 
         return stratified_output_dir
 
