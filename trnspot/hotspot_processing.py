@@ -17,6 +17,7 @@ import marsilea as ma
 from . import config
 
 from . import enrichment_analysis as ea
+from matplotlib.patches import Patch
 
 
 def plot_hotspot_annotation(hs_obj: hs.Hotspot):
@@ -82,69 +83,51 @@ def plot_hotspot_annotation(hs_obj: hs.Hotspot):
 
     # Add heatmap with custom parameters
 
-    heatmap = ma.Heatmap(
-        data=hs_obj.local_correlation_z,
+    # Prepare row colors for clustermap
+    # row_colors dataframe needs to be converted to colors if not already
+    # In the previous code, row_colors['Modules'] contained hex codes.
+    # We need to ensure the index matches the data.
+
+    # Create the clustermap
+    g = sns.clustermap(
+        hs_obj.local_correlation_z,
+        row_linkage=hs_obj.linkage,
+        col_linkage=hs_obj.linkage,
+        row_colors=row_colors["Modules"],
         cmap="RdBu_r",
         vmin=-8,
         vmax=8,
+        xticklabels=False,
+        yticklabels=False,
         rasterized=True,
+        figsize=(12, 12),
     )
 
-    # Add row colors as chunks
-    heatmap.add_left(
-        ma.plotter.Chunk(
-            row_colors["Modules"],
-            label="Modules",
-            size=0.3,
-        )
+    # Add a legend for the modules
+    # Create a list of patches for the legend
+
+    legend_elements = [
+        Patch(facecolor=color, edgecolor="k", label=f"Module {module}")
+        for module, color in module_colors.items()
+        if module != -1
+    ]
+
+    # Add the legend to the figure
+    g.ax_heatmap.legend(
+        handles=legend_elements,
+        loc="upper left",
+        bbox_to_anchor=(1.05, 1),
+        title="Modules",
+        frameon=False,
     )
 
-    # Add module annotations as labels
-    # Create a mapping of unique modules to their annotations
-    unique_modules = hs_obj.modules.unique()
-    module_to_annotation = {}
-    for module in unique_modules:
-        if module != -1 and module in module_annotations:
-            module_to_annotation[module] = module_annotations[module]
-
-    # Get the module for each gene and create labels
-    gene_module_labels = []
-    for gene_idx, module in enumerate(hs_obj.modules):
-        if module in module_to_annotation:
-            gene_module_labels.append(module_to_annotation[module])
-        else:
-            gene_module_labels.append("")
-
-    heatmap.add_left(
-        ma.plotter.Labels(
-            gene_module_labels,
-            align="left",
-            fontsize=6,
-        ),
-        size=3,
-        pad=0.1,
-    )
-
-    # Set custom linkage for rows and columns
-    heatmap.add_dendrogram(
-        side="left",
-        linkage=hs_obj.linkage,
-        rasterized=True,
-        add_meta=False,
-        show=False,
-    )
-    heatmap.add_dendrogram(
-        side="top",
-        linkage=hs_obj.linkage,
-        rasterized=True,
-        add_meta=False,
-    )
-
-    # Render the plot
-    heatmap.save(
+    # Save the figure
+    plt.savefig(
         f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.png",
         dpi=300,
+        bbox_inches="tight",
     )
+    plt.close()
 
 
 def save_hotspot_results(
