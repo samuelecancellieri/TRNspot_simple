@@ -7,7 +7,8 @@ __author__ = "Samuele Cancellieri"
 
 # Import main modules
 from . import preprocessing
-from . import grn_analysis
+
+# from . import grn_analysis
 from . import celloracle_processing
 from . import hotspot_processing
 from . import config
@@ -17,7 +18,7 @@ from .config import set_random_seed, set_scanpy_settings, get_config, print_conf
 
 __all__ = [
     "preprocessing",
-    "grn_analysis",
+    # "grn_analysis",
     "celloracle_processing",
     "hotspot_processing",
     "config",
