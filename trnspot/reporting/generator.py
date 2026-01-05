@@ -420,6 +420,23 @@ class ReportGenerator:
                 text-overflow: ellipsis;
             }
 
+            /* Subsection Tabs */
+            .subsection {
+                background: var(--background-color);
+                border: 1px solid var(--border-color);
+                border-radius: 0.5rem;
+                padding: 1.5rem;
+                margin: 1rem 0;
+            }
+
+            .subsection h3 {
+                color: var(--primary-color);
+                font-size: 1.1rem;
+                margin: 0 0 1rem 0;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border-color);
+            }
+
             /* Lightbox */
             .lightbox {
                 display: none;

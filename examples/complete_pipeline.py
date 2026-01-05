@@ -330,6 +330,7 @@ class PipelineController:
                 adata,
                 layer_key=self.args.raw_count_layer,
                 embedding_key=self.args.embedding_hotspot,
+                normalization_key=self.args.normalization_key,
                 skip_hotspot=self.args.skip_hotspot,
                 log_dir=log_dir,
             )
@@ -1047,6 +1048,7 @@ def hotspot_pipeline(
     adata,
     layer_key="raw_counts",
     embedding_key="X_pca",
+    normalization_key="n_counts",
     skip_hotspot=False,
     log_dir=None,
 ):
@@ -1101,7 +1103,7 @@ def hotspot_pipeline(
                 layer_key=layer_key,
                 model="danb",
                 embedding_key=embedding_key,
-                normalization_key="n_counts",
+                normalization_key=normalization_key,
             )
             print("  ✓ Hotspot object created")
             log_step(
@@ -1398,6 +1400,12 @@ Examples:
         type=str,
         default="X_pca",
         help="Embedding name for Hotspot analysis (default: X_pca)",
+    )
+    parser.add_argument(
+        "--normalization-key",
+        type=str,
+        default="n_counts",
+        help="Column name in adata.obs for normalization counts (default: n_counts)",
     )
     parser.add_argument(
         "--raw-count-layer",

@@ -275,7 +275,7 @@ def run_hotspot_analysis(hotspot_obj):
     plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
     plt.close()
 
-    # plot_hotspot_annotation(hotspot_obj)
+    plot_hotspot_annotation(hotspot_obj)
 
     save_hotspot_results(hotspot_obj)
 

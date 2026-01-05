@@ -441,12 +441,54 @@ def create_clustering_section(
     )
 
 
+def _find_grn_figures_by_score(
+    output_dir: str,
+    score_type: str,
+    max_figures: int = 30,
+) -> List[str]:
+    """
+    Find GRN figures for a specific score type.
+
+    Parameters
+    ----------
+    output_dir : str
+        Output directory
+    score_type : str
+        Score type to filter by (e.g., 'eigenvector', 'betweenness', 'degree_in')
+    max_figures : int
+        Maximum figures to return
+
+    Returns
+    -------
+    list
+        List of figure paths matching the score type
+    """
+    figures = []
+    grn_dirs = [
+        os.path.join(output_dir, "figures/grn"),
+        os.path.join(output_dir, "figures/grn/grn_deep_analysis"),
+        os.path.join(output_dir, "grn_deep_analysis"),
+    ]
+
+    for grn_dir in grn_dirs:
+        if not os.path.exists(grn_dir):
+            continue
+        for pattern in ["*.png", "*.jpg", "*.svg"]:
+            for f in glob.glob(os.path.join(grn_dir, "**", pattern), recursive=True):
+                fname_lower = os.path.basename(f).lower()
+                # Match score type in filename
+                if score_type.lower() in fname_lower:
+                    figures.append(f)
+
+    return sorted(set(figures))[:max_figures]
+
+
 def create_celloracle_section(
     celloracle_result,
     output_dir: str,
 ) -> ReportSection:
     """
-    Create CellOracle GRN Analysis section.
+    Create CellOracle GRN Analysis section with score-based tabs.
     """
     metrics = {}
 
@@ -497,20 +539,60 @@ def create_celloracle_section(
         <li><code>celloracle/grn_merged_scores.csv</code> - Network centrality scores</li>
         <li><code>celloracle/grn_filtered_links.pkl</code> - Filtered regulatory links</li>
     </ul>
+    
+    <p><em>See tabs below for detailed plots organized by score type.</em></p>
     """
 
-    figures = _find_figures(
-        output_dir,
-        ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
-        max_figures=30,
-    )
+    # Define score categories with display names and search patterns
+    score_categories = [
+        ("Eigenvector Centrality", "eigenvector"),
+        ("Betweenness Centrality", "betweenness"),
+        ("Degree (All)", "degree_all"),
+        ("Degree (In)", "degree_in"),
+        ("Degree (Out)", "degree_out"),
+        ("Degree Centrality (All)", "degree_centrality_all"),
+        ("Degree Centrality (In)", "degree_centrality_in"),
+        ("Degree Centrality (Out)", "degree_centrality_out"),
+        ("Network Graphs", "network"),
+        ("Other GRN Plots", None),  # Catch-all for remaining plots
+    ]
+
+    # Collect figures for each category
+    subsections = []
+    used_figures = set()
+
+    for display_name, pattern in score_categories:
+        if pattern is None:
+            # "Other" category - get all remaining figures not yet categorized
+            all_grn_figures = _find_figures(
+                output_dir,
+                ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
+                max_figures=100,
+            )
+            category_figures = [f for f in all_grn_figures if f not in used_figures]
+        else:
+            category_figures = _find_grn_figures_by_score(output_dir, pattern)
+            # Remove figures already used in more specific categories
+            # (e.g., degree_centrality_all should not appear in degree_all)
+            category_figures = [f for f in category_figures if f not in used_figures]
+
+        if category_figures:
+            used_figures.update(category_figures)
+            subsections.append(
+                ReportSection(
+                    title=f"📊 {display_name}",
+                    section_id=f"grn-{pattern or 'other'}".replace("_", "-"),
+                    content=f"<p>{len(category_figures)} plots for {display_name.lower()} analysis.</p>",
+                    figures=category_figures[:20],  # Limit per category
+                )
+            )
 
     return ReportSection(
         title="🧬 CellOracle GRN Analysis",
         section_id="celloracle",
         content=content,
-        figures=figures,
         metrics=metrics,
+        subsections=subsections,
     )
 
 
