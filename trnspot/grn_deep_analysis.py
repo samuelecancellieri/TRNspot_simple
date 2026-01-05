@@ -138,13 +138,26 @@ def plot_network_graph(
         None
     """
 
+    # print(score_df.head())
     for score in scores:
         top_genes_by_cluster = pd.DataFrame()
         filtered_links_df = pd.DataFrame()
         for cluster in score_df["cluster"].unique():
             cluster_scores = score_df.query(f"cluster == '{cluster}'").copy()
-            percentile = np.percentile(cluster_scores[score], 90)
+
+            # Skip if no data for this cluster/score combination
+            if cluster_scores.empty or cluster_scores[score].dropna().empty:
+                print(
+                    f"  Warning: No data for cluster '{cluster}' and score '{score}', skipping..."
+                )
+                continue
+
+            percentile = np.percentile(cluster_scores[score].dropna(), 90)
             cluster_scores = cluster_scores.query(f"{score} > {percentile}")
+
+            if cluster_scores.empty:
+                continue
+
             cluster_scores["gene"] = cluster_scores.index
             top_genes_by_cluster = pd.concat(
                 [top_genes_by_cluster, cluster_scores], axis=0
@@ -162,6 +175,11 @@ def plot_network_graph(
                 [filtered_links_df, filtered_links_cluster], axis=0
             )
 
+        # Skip if no data collected
+        if top_genes_by_cluster.empty or filtered_links_df.empty:
+            print(f"  Warning: No data to plot for score '{score}', skipping...")
+            continue
+
         top_genes_by_cluster = top_genes_by_cluster.reset_index(drop=True)
         filtered_links_df = filtered_links_df.reset_index(drop=True)
 
@@ -172,7 +190,18 @@ def plot_network_graph(
             create_using=nx.Graph(),
         )
 
-        components = nx.connected_components(graph)
+        # Skip if graph is empty
+        if graph.number_of_nodes() == 0:
+            print(f"  Warning: Empty graph for score '{score}', skipping...")
+            continue
+
+        components = list(nx.connected_components(graph))
+        if not components:
+            print(
+                f"  Warning: No connected components for score '{score}', skipping..."
+            )
+            continue
+
         largest_component = max(components, key=len)
         H = graph.subgraph(largest_component)
 
