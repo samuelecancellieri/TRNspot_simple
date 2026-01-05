@@ -1,6 +1,6 @@
+import os
 import pickle
 import scanpy as sc
-from scipy import cluster
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -17,6 +17,22 @@ import numpy as np
 from . import config
 
 
+def _plot_exists(filepath: str, skip_existing: bool = True) -> bool:
+    """
+    Check if a plot file already exists.
+
+    Args:
+        filepath (str): Path to the plot file.
+        skip_existing (bool): If True, check for existence. If False, always return False.
+
+    Returns:
+        bool: True if file exists and skip_existing is True, False otherwise.
+    """
+    if not skip_existing:
+        return False
+    return os.path.exists(filepath)
+
+
 def _plot_network_graph_single_score(
     graph: nx.DiGraph,
     cluster: str,
@@ -24,6 +40,7 @@ def _plot_network_graph_single_score(
     score: str,
     node_size_factor: float = 1000.0,
     edge_width_factor: float = 1.0,
+    skip_existing: bool = True,
 ):
     """
     Plot a network graph using networkx and matplotlib for a single score.
@@ -35,9 +52,16 @@ def _plot_network_graph_single_score(
         score (str): The score to visualize.
         node_size_factor (float): Factor to scale node sizes.
         edge_width_factor (float): Factor to scale edge widths.
+        skip_existing (bool): If True, skip plotting if file already exists.
     Returns:
         None
     """
+    output_path = (
+        f"{config.FIGURES_DIR_GRN}/grn_network_{score}_{stratification}_{cluster}.png"
+    )
+    if _plot_exists(output_path, skip_existing):
+        print(f"  Skipping existing: {os.path.basename(output_path)}")
+        return 0
 
     plt.figure(figsize=config.PLOT_FIGSIZE_WIDE)
 
@@ -79,7 +103,7 @@ def _plot_network_graph_single_score(
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(
-        f"{config.FIGURES_DIR_GRN}/grn_network_{score}_{stratification}_{cluster}.png",
+        output_path,
         dpi=config.SAVE_DPI,
         bbox_inches="tight",
     )
@@ -101,6 +125,7 @@ def plot_network_graph(
         "betweenness_centrality",
         "eigenvector_centrality",
     ],
+    skip_existing: bool = True,
 ):
     """
     Plot network graphs for multiple scores.
@@ -108,6 +133,7 @@ def plot_network_graph(
         score_df (pd.DataFrame): DataFrame containing scores.
         links_df (pd.DataFrame): DataFrame containing links.
         scores (list[str]): List of scores to plot.
+        skip_existing (bool): If True, skip plotting if files already exist.
     Returns:
         None
     """
@@ -190,6 +216,7 @@ def plot_heatmap_single_score(
     cluster2: str,
     score: str,
     top_n_genes: int = 5,
+    skip_existing: bool = True,
 ):
     """
     Plot a heatmap for a single score and stratification.
@@ -199,10 +226,15 @@ def plot_heatmap_single_score(
         strat (str): Stratification to filter the DataFrame.
         score (str): Score column to plot.
         top_n_genes (int): Number of top genes to display.
+        skip_existing (bool): If True, skip plotting if file already exists.
 
     Returns:
         None
     """
+    output_path = f"{config.FIGURES_DIR_GRN}/grn_heatmap_{score}_difference_top{top_n_genes}_{cluster1}_vs_{cluster2}.png"
+    if _plot_exists(output_path, skip_existing):
+        print(f"  Skipping existing: {os.path.basename(output_path)}")
+        return 0
 
     heatmap_data_melt_score = heatmap_data.query("score == @score").copy()
 
@@ -258,7 +290,7 @@ def plot_heatmap_single_score(
 
     # Save and close
     fig.savefig(
-        f"{config.FIGURES_DIR_GRN}/grn_heatmap_{score}_difference_top{top_n_genes}_{cluster1}_vs_{cluster2}.png",
+        output_path,
         dpi=config.SAVE_DPI,
         bbox_inches="tight",
     )
@@ -280,6 +312,7 @@ def plot_heatmap_scores(
         "betweenness_centrality",
         "eigenvector_centrality",
     ],
+    skip_existing: bool = True,
 ):
     """
     Plot a heatmap of scores using seaborn.
@@ -292,6 +325,7 @@ def plot_heatmap_scores(
         title (str): Title of the heatmap.
         figsize (tuple[int, int]): Figure size.
         cmap (str): Colormap to use.
+        skip_existing (bool): If True, skip plotting if files already exist.
 
     Returns:
         matplotlib.figure.Figure: The generated heatmap figure.
@@ -319,6 +353,7 @@ def plot_heatmap_scores(
                 cluster1=cluster1,
                 cluster2=cluster2,
                 top_n_genes=top_n_genes,
+                skip_existing=skip_existing,
             )
 
     return 0
@@ -417,6 +452,7 @@ def plot_scatter_scores(
         "betweenness_centrality",
         "eigenvector_centrality",
     ],
+    skip_existing: bool = True,
 ):
     """
     Plot a scatter plot comparing scores between two stratifications for a given cluster.
@@ -426,6 +462,7 @@ def plot_scatter_scores(
         cluster (str): The cluster to analyze.
         score (str): The score column to compare.
         stratifications (list[str]): List of two stratifications to compare.
+        skip_existing (bool): If True, skip plotting if files already exist.
     Returns:
         matplotlib.figure.Figure: The generated plot figure.
     """
@@ -434,6 +471,12 @@ def plot_scatter_scores(
 
     for cluster1, cluster2 in cluster_combinations:
         for score in scores_list:
+            cluster1_clean = str(cluster1).replace(" ", "_").strip()
+            cluster2_clean = str(cluster2).replace(" ", "_").strip()
+            output_path = f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/grn_scatter_{score}_{cluster1_clean}_vs_{cluster2_clean}.png"
+            if _plot_exists(output_path, skip_existing):
+                print(f"  Skipping existing: {os.path.basename(output_path)}")
+                continue
             # print(f"Generating scatter plot for {score} - {cluster1} vs {cluster2}")
             genes_t, plot_t, texts_t = plot_score_comparison_2D(
                 score_df=score_df,
@@ -449,13 +492,11 @@ def plot_scatter_scores(
                 plt_show=False,
             )
 
-            cluster1_clean = str(cluster1).replace(" ", "_").strip()
-            cluster2_clean = str(cluster2).replace(" ", "_").strip()
             plot_t.axes[0].grid(False)
             sns.despine(ax=plot_t.axes[0])
 
             plot_t.savefig(
-                f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/grn_scatter_{score}_{cluster1_clean}_vs_{cluster2_clean}.png",
+                output_path,
                 dpi=config.SAVE_DPI,
                 bbox_inches="tight",
             )
@@ -476,6 +517,7 @@ def plot_difference_cluster_scores(
         "betweenness_centrality",
         "eigenvector_centrality",
     ],
+    skip_existing: bool = True,
 ):
     """
     Plot the difference in scores between two stratifications for a given cluster.
@@ -485,6 +527,7 @@ def plot_difference_cluster_scores(
         cluster (str): The cluster to analyze.
         score (str): The score column to compare.
         stratifications (list[str]): List of two stratifications to compare.
+        skip_existing (bool): If True, skip plotting if files already exist.
 
     Returns:
         matplotlib.figure.Figure: The generated plot figure.
@@ -522,6 +565,11 @@ def plot_difference_cluster_scores(
         common_tfs = list(tf_overlap)
 
         for score in scores:
+            output_path = f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/top_genes_difference_{stratifications[0]}-{stratifications[1]}_{score}_rankplot.png"
+            if _plot_exists(output_path, skip_existing):
+                print(f"  Skipping existing: {os.path.basename(output_path)}")
+                continue
+
             if common_tfs:
                 diff_df = pd.DataFrame(
                     {
@@ -608,11 +656,11 @@ def plot_difference_cluster_scores(
             ax.grid(False)
             # plt.tight_layout()
             fig.savefig(
-                f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/top_genes_difference_{stratifications[0]}-{stratifications[1]}_{score}_rankplot.png",
+                output_path,
                 bbox_inches="tight",
                 dpi=300,
             )
-            # plt.show()
+            plt.close(fig)
 
     return 0
 
@@ -629,9 +677,15 @@ def plot_compare_cluster_scores(
         "betweenness_centrality",
         "eigenvector_centrality",
     ],
+    skip_existing: bool = True,
 ):
     """
     Compare scores across clusters and plot differences.
+
+    Args:
+        score_df (pd.DataFrame): DataFrame containing scores.
+        scores (list[str]): List of scores to plot.
+        skip_existing (bool): If True, skip plotting if files already exist.
     """
 
     clusters = sorted(set(score_df["cluster"].tolist()))
@@ -643,6 +697,11 @@ def plot_compare_cluster_scores(
 
     # For each score, create barplots showing top 10 genes per cluster for each stratification
     for score in scores:
+        output_path = f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/grn_barplot_{score}_{stratification_name}_top10.png"
+        if _plot_exists(output_path, skip_existing):
+            print(f"  Skipping existing: {os.path.basename(output_path)}")
+            continue
+
         n_clusters = len(clusters)
         n_cols = int(np.ceil(np.sqrt(n_clusters)))
         n_rows = int(np.ceil(n_clusters / n_cols))
@@ -684,7 +743,7 @@ def plot_compare_cluster_scores(
             fontsize=16,
         )
         fig.savefig(
-            f"{config.FIGURES_DIR_GRN}/grn_deep_analysis/grn_barplot_{score}_{stratification_name}_top10.png",
+            output_path,
             dpi=config.SAVE_DPI,
             bbox_inches="tight",
         )
