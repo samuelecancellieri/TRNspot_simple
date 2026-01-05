@@ -363,4 +363,79 @@ def perform_dimensionality_reduction_clustering(
     sc.tl.leiden(adata_cc, resolution=config.LEIDEN_RESOLUTION)
     print(f"Performed Leiden clustering with resolution {config.LEIDEN_RESOLUTION}")
 
+    # Convert categorical columns for stratification compatibility
+    adata_cc = ensure_categorical_obs(adata_cc)
+
     return adata_cc
+
+
+def ensure_categorical_obs(
+    adata: AnnData,
+    columns: Optional[list] = None,
+) -> AnnData:
+    """
+    Convert object/string columns in adata.obs to pandas Categorical type.
+
+    This ensures consistent behavior during stratification, avoiding conflicts
+    between string comparisons and numeric values.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data matrix.
+    columns : list, optional
+        Specific columns to convert. If None, converts all object/string columns
+        and common clustering columns (leiden, louvain, cell_type, etc.).
+
+    Returns
+    -------
+    AnnData
+        AnnData with categorical columns in .obs.
+
+    Examples
+    --------
+    >>> adata = ensure_categorical_obs(adata)
+    >>> adata = ensure_categorical_obs(adata, columns=['cell_type', 'batch'])
+    """
+    # Common stratification/clustering columns to always convert if present
+    default_categorical_cols = [
+        "leiden",
+        "louvain",
+        "cell_type",
+        "celltype",
+        "cluster",
+        "clusters",
+        "batch",
+        "sample",
+        "condition",
+    ]
+
+    if columns is None:
+        # Auto-detect: object dtype columns + known categorical columns
+        columns_to_convert = []
+
+        # Add object/string dtype columns
+        for col in adata.obs.columns:
+            if (
+                adata.obs[col].dtype == "object"
+                or adata.obs[col].dtype.name == "string"
+            ):
+                columns_to_convert.append(col)
+
+        # Add default categorical columns if they exist
+        for col in default_categorical_cols:
+            if col in adata.obs.columns and col not in columns_to_convert:
+                columns_to_convert.append(col)
+    else:
+        columns_to_convert = [c for c in columns if c in adata.obs.columns]
+
+    converted = []
+    for col in columns_to_convert:
+        if not isinstance(adata.obs[col].dtype, pd.CategoricalDtype):
+            adata.obs[col] = adata.obs[col].astype("category")
+            converted.append(col)
+
+    if converted:
+        print(f"Converted to categorical: {', '.join(converted)}")
+
+    return adata

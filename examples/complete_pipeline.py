@@ -22,6 +22,7 @@ import argparse
 import sys
 from datetime import datetime
 import scanpy as sc
+import pandas as pd
 import pickle
 import hashlib
 import json
@@ -696,23 +697,38 @@ def stratification_pipeline(adata, cluster_key_stratification=None, clusters="al
         print("STEP 2.5: Stratification by Clusters")
         print(f"{'='*70}")
 
+        # Ensure the stratification column is categorical to avoid str/numeric conflicts
+        if not isinstance(
+            adata.obs[cluster_key_stratification].dtype, pd.CategoricalDtype
+        ):
+            adata.obs[cluster_key_stratification] = adata.obs[
+                cluster_key_stratification
+            ].astype("category")
+            print(f"  Converted '{cluster_key_stratification}' to categorical")
+
         adata_list = list()
         adata_stratification_list = list()
 
         # check unique clusters and filter based on 'clusters' parameter
         if clusters == "all":
-            unique_clusters = adata.obs[cluster_key_stratification].unique()
+            unique_clusters = adata.obs[cluster_key_stratification].cat.categories
         else:
-            unique_clusters = set(
-                adata.obs[cluster_key_stratification].unique()
-            ).intersection(set([c.strip() for c in clusters.split(",") if c.strip()]))
+            requested_clusters = set(
+                [c.strip() for c in clusters.split(",") if c.strip()]
+            )
+            unique_clusters = [
+                c
+                for c in adata.obs[cluster_key_stratification].cat.categories
+                if str(c) in requested_clusters
+            ]
 
         for cluster in unique_clusters:
             adata_cluster = adata[
                 adata.obs[cluster_key_stratification] == cluster
             ].copy()
             adata_list.append(adata_cluster)
-            adata_stratification_list.append(cluster.replace(" ", "_"))
+            # Convert to string for folder naming (handles numeric cluster IDs)
+            adata_stratification_list.append(str(cluster).replace(" ", "_"))
             print(
                 f"  ✓ Cluster '{cluster}': {adata_cluster.n_obs} cells × {adata_cluster.n_vars} genes"
             )
