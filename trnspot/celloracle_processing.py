@@ -321,6 +321,7 @@ def run_links(
 
     return links
 
+
 def perform_grn_pre_processing(
     adata: AnnData,
     cluster_key: str,
@@ -388,6 +389,12 @@ def perform_grn_pre_processing(
 
     # Make a copy to avoid modifying the original
     adata_cc = adata.copy()
+
+    # Ensure cluster_key is categorical to avoid str/numeric comparison issues
+    if cluster_key in adata_cc.obs.columns:
+        if not isinstance(adata_cc.obs[cluster_key].dtype, pd.CategoricalDtype):
+            adata_cc.obs[cluster_key] = adata_cc.obs[cluster_key].astype("category")
+            print(f"  Converted '{cluster_key}' to categorical")
 
     # Filter genes based on variance and subset
     sc.pp.highly_variable_genes(adata_cc, n_top_genes=top_genes, subset=True)

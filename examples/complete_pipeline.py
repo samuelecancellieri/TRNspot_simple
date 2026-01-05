@@ -35,6 +35,7 @@ from trnspot.preprocessing import (
     perform_qc,
     perform_normalization,
     perform_dimensionality_reduction_clustering,
+    ensure_categorical_obs,
 )
 
 
@@ -775,15 +776,20 @@ def dimensionality_reduction_clustering(adata, cluster_key="leiden", log_dir=Non
                 {"checkpoint_file": checkpoint_file},
             )
             print(f"  Loading clustered data from: {checkpoint_file}")
-            return sc.read_h5ad(checkpoint_file)
+            adata_loaded = sc.read_h5ad(checkpoint_file)
+            # Ensure cluster_key is categorical after loading from checkpoint
+            adata_loaded = ensure_categorical_obs(adata_loaded, columns=[cluster_key])
+            return adata_loaded
 
         # Perform dimensionality reduction and clustering
         log_step("DimReduction_Clustering.Processing", "STARTED")
         adata = perform_dimensionality_reduction_clustering(adata)
+        # Ensure cluster_key is categorical (in addition to default columns)
+        adata = ensure_categorical_obs(adata, columns=[cluster_key])
         log_step("DimReduction_Clustering.Processing", "COMPLETED")
 
         # Get cluster count
-        n_clusters = len(adata.obs["leiden"].unique())
+        n_clusters = len(adata.obs[cluster_key].unique())
         print(f"✓ Identified {n_clusters} clusters")
 
         # Save checkpoint
