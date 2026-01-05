@@ -135,6 +135,13 @@ outputs = generate_report(
 )
 print(f"HTML: {outputs['html']}")
 print(f"PDF: {outputs.get('pdf', 'Not generated')}")
+
+# For smaller HTML file size (images as relative paths)
+outputs = generate_report(
+    output_dir="results/",
+    title="My Analysis Report",
+    embed_images=False,  # Use relative paths instead of base64
+)
 ```
 
 ### Report Contents
@@ -148,6 +155,13 @@ print(f"PDF: {outputs.get('pdf', 'Not generated')}")
 - **Hotspot Modules**: Gene module analysis
 - **Operations Log**: Complete pipeline execution log
 - **Plot Gallery**: Interactive gallery with lightbox navigation
+
+### Report Options
+
+| Parameter      | Default           | Description                                                                                                   |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `embed_images` | `True`            | If `True`, embed images as base64 (self-contained but larger). If `False`, use relative paths (smaller file). |
+| `formats`      | `["html", "pdf"]` | List of output formats to generate                                                                            |
 
 ## AnnData Conventions
 

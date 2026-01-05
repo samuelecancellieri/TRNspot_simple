@@ -8,6 +8,7 @@ Main class and functions for generating comprehensive HTML and PDF reports.
 import os
 import glob
 import base64
+import json
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
@@ -653,7 +654,11 @@ class ReportGenerator:
     def _render_figures(
         self, figures: List[str], embed: bool = True, gallery_id: str = "gallery"
     ) -> str:
-        """Render figures as an interactive gallery."""
+        """Render figures as an interactive gallery.
+
+        Images are stored once in a JavaScript array and referenced by index
+        to avoid duplicating base64 data in each gallery item's onclick handler.
+        """
         if not figures:
             return ""
 
@@ -661,25 +666,34 @@ class ReportGenerator:
         if not valid_figures:
             return "<p><em>No figures available</em></p>"
 
-        html_parts = [f'<div class="gallery" id="{gallery_id}">']
+        # Pre-compute image sources once
+        if embed:
+            image_sources = [self._image_to_base64(f) for f in valid_figures]
+        else:
+            image_sources = valid_figures
+
+        # Create a unique array name for this gallery to avoid conflicts
+        array_name = f"galleryImages_{gallery_id.replace('-', '_')}"
+
+        # Build JavaScript array with images (stored only once)
+        images_json = json.dumps(image_sources)
+        html_parts = [
+            f"<script>var {array_name} = {images_json};</script>",
+            f'<div class="gallery" id="{gallery_id}">',
+        ]
 
         for idx, fig_path in enumerate(valid_figures):
-            if embed:
-                src = self._image_to_base64(fig_path)
-            else:
-                src = fig_path
-
             caption = Path(fig_path).stem.replace("_", " ").replace("-", " ").title()
             if len(caption) > 40:
                 caption = caption[:37] + "..."
 
-            # Create gallery item that opens lightbox
-            gallery_js = f"openLightbox({[self._image_to_base64(f) if embed else f for f in valid_figures]}, {idx})"
+            # Reference the pre-stored array by index instead of embedding all images again
+            gallery_js = f"openLightbox({array_name}, {idx})"
 
             html_parts.append(
                 f"""
             <div class="gallery-item" onclick='{gallery_js}'>
-                <img src="{src}" alt="{caption}" loading="lazy">
+                <img src="{image_sources[idx]}" alt="{caption}" loading="lazy">
                 <div class="caption" title="{Path(fig_path).stem}">{caption}</div>
             </div>
             """
@@ -911,6 +925,7 @@ def generate_report(
     hotspot_result=None,
     log_file: Optional[str] = None,
     formats: List[str] = ["html", "pdf"],
+    embed_images: bool = True,
 ) -> Dict[str, str]:
     """
     Generate comprehensive analysis report in specified formats.
@@ -933,6 +948,9 @@ def generate_report(
         Path to pipeline log file
     formats : list
         Output formats ('html', 'pdf')
+    embed_images : bool
+        If True, embed images as base64 (larger file, self-contained).
+        If False, use relative paths (smaller file, requires images in place).
 
     Returns
     -------
@@ -980,7 +998,7 @@ def generate_report(
 
     if "html" in formats:
         html_path = os.path.join(output_dir, "report.html")
-        generator.generate_html(html_path)
+        generator.generate_html(html_path, embed_images=embed_images)
         outputs["html"] = html_path
 
     if "pdf" in formats:
@@ -992,9 +1010,11 @@ def generate_report(
     return outputs
 
 
-def generate_html_report(output_dir: str, **kwargs) -> str:
+def generate_html_report(output_dir: str, embed_images: bool = False, **kwargs) -> str:
     """Convenience function to generate HTML report only."""
-    outputs = generate_report(output_dir, formats=["html"], **kwargs)
+    outputs = generate_report(
+        output_dir, formats=["html"], embed_images=embed_images, **kwargs
+    )
     return outputs.get("html", "")
 
 

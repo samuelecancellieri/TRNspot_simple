@@ -36,6 +36,54 @@ def _find_figures(
     return sorted(set(figures))[:max_figures]
 
 
+def _find_embedding_figures(
+    output_dir: str,
+    max_figures: int = 15,
+) -> List[str]:
+    """
+    Find embedding/clustering-specific figures.
+
+    Excludes GRN, hotspot, and other analysis plots.
+    """
+    embedding_keywords = [
+        "umap",
+        "pca",
+        "cluster",
+        "leiden",
+        "louvain",
+        "neighbors",
+        "embedding",
+        "tsne",
+    ]
+    exclude_keywords = [
+        "grn",
+        "network",
+        "centrality",
+        "hotspot",
+        "module",
+        "autocorrelation",
+        "heatmap",
+        "tf_",
+        "regulatory",
+    ]
+
+    figures = []
+    figures_dir = os.path.join(output_dir, "figures")
+
+    if os.path.exists(figures_dir):
+        for pattern in ["*.png", "*.jpg", "*.svg"]:
+            # Only search top-level figures directory, not subdirectories
+            for f in glob.glob(os.path.join(figures_dir, pattern)):
+                fname_lower = os.path.basename(f).lower()
+                # Include if matches embedding keywords or is a general plot
+                if any(kw in fname_lower for kw in embedding_keywords):
+                    # Exclude if matches analysis-specific keywords
+                    if not any(ex in fname_lower for ex in exclude_keywords):
+                        figures.append(f)
+
+    return sorted(set(figures))[:max_figures]
+
+
 def _format_number(value) -> str:
     """Format a number for display."""
     if isinstance(value, float):
@@ -380,7 +428,8 @@ def create_clustering_section(
     with similar transcriptional profiles.</p>
     """
 
-    figures = _find_figures(output_dir, ["figures", "figures/qc"], max_figures=10)
+    # Find only clustering/embedding plots, not GRN or other analysis plots
+    figures = _find_embedding_figures(output_dir, max_figures=10)
 
     return ReportSection(
         title="🎨 Clustering & Visualization",
@@ -600,93 +649,56 @@ def create_plot_gallery_section(
     output_dir: str,
 ) -> ReportSection:
     """
-    Create a comprehensive plot gallery section.
+    Create a summary section with links to plot locations.
+
+    Note: Individual plots are shown in their respective analysis sections
+    (QC, Clustering, GRN, Hotspot) to avoid duplication.
     """
-    # Find all figures organized by category
-    subsections = []
-
-    # QC plots
-    qc_figures = _find_figures(output_dir, ["figures/qc", "qc"], max_figures=15)
-    if qc_figures:
-        subsections.append(
-            ReportSection(
-                title="Quality Control Plots",
-                section_id="gallery-qc",
-                content="<p>Visualizations of quality control metrics and filtering results.</p>",
-                figures=qc_figures,
-            )
+    # Count figures by category without including them
+    qc_count = len(_find_figures(output_dir, ["figures/qc", "qc"], max_figures=100))
+    grn_count = len(
+        _find_figures(
+            output_dir,
+            ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
+            max_figures=100,
         )
-
-    # Embedding/clustering plots
-    embedding_patterns = ["*umap*", "*pca*", "*cluster*", "*leiden*"]
-    embedding_figures = []
-    for pattern in embedding_patterns:
-        embedding_figures.extend(
-            glob.glob(os.path.join(output_dir, "figures", pattern), recursive=False)
-        )
-        embedding_figures.extend(
-            glob.glob(
-                os.path.join(output_dir, "figures", "**", pattern), recursive=True
-            )
-        )
-
-    embedding_figures = sorted(
-        set([f for f in embedding_figures if os.path.isfile(f)])
-    )[:15]
-    if embedding_figures:
-        subsections.append(
-            ReportSection(
-                title="Embedding & Clustering Plots",
-                section_id="gallery-embedding",
-                content="<p>UMAP, PCA, and clustering visualizations.</p>",
-                figures=embedding_figures,
-            )
-        )
-
-    # GRN plots
-    grn_figures = _find_figures(
-        output_dir,
-        ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
-        max_figures=30,
     )
-    if grn_figures:
-        subsections.append(
-            ReportSection(
-                title="GRN Analysis Plots",
-                section_id="gallery-grn",
-                content="<p>Gene regulatory network analysis visualizations including network scores and comparisons.</p>",
-                figures=grn_figures,
-            )
-        )
-
-    # Hotspot plots
-    hotspot_figures = _find_figures(
-        output_dir, ["figures/hotspot", "hotspot"], max_figures=20
+    hotspot_count = len(
+        _find_figures(output_dir, ["figures/hotspot", "hotspot"], max_figures=100)
     )
-    if hotspot_figures:
-        subsections.append(
-            ReportSection(
-                title="Hotspot Module Plots",
-                section_id="gallery-hotspot",
-                content="<p>Gene module analysis visualizations.</p>",
-                figures=hotspot_figures,
-            )
-        )
+    embedding_count = len(_find_embedding_figures(output_dir, max_figures=100))
 
-    # Count total figures
-    total_figures = sum(len(s.figures) for s in subsections)
+    total_figures = qc_count + grn_count + hotspot_count + embedding_count
 
     content = f"""
-    <p>Interactive gallery of all plots generated during the analysis.
-    Click on any image to view it in full size. Use arrow keys or buttons to navigate.</p>
-    <p><strong>Total plots:</strong> {total_figures}</p>
+    <p>All plots are shown in their respective analysis sections above.</p>
+    
+    <h3>📊 Plot Summary</h3>
+    <ul>
+        <li><strong>Quality Control:</strong> {qc_count} plots 
+            (see <a href="#qc">QC Section</a>)</li>
+        <li><strong>Clustering & Embedding:</strong> {embedding_count} plots 
+            (see <a href="#clustering">Clustering Section</a>)</li>
+        <li><strong>GRN Analysis:</strong> {grn_count} plots 
+            (see <a href="#celloracle">CellOracle Section</a>)</li>
+        <li><strong>Hotspot Modules:</strong> {hotspot_count} plots 
+            (see <a href="#hotspot">Hotspot Section</a>)</li>
+    </ul>
+    
+    <h3>📁 Figure Locations</h3>
+    <pre><code>{output_dir}/figures/
+├── qc/           # Quality control plots
+├── grn/          # GRN and network analysis plots
+└── hotspot/      # Gene module analysis plots</code></pre>
+    
+    <p><strong>Total plots generated:</strong> {total_figures}</p>
     """
 
     return ReportSection(
-        title="🖼️ Plot Gallery",
+        title="🖼️ Plot Summary",
         section_id="plot-gallery",
         content=content,
-        subsections=subsections,
+        metrics={"Total Plots": total_figures},
     )
 
 
