@@ -6,7 +6,7 @@
 
 ### Data Flow
 
-`AnnData (.h5ad)` → **Preprocessing** (QC/normalization) → **Clustering** → **CellOracle** (GRN inference) + **Hotspot** (gene modules) → **Deep Analysis** (visualization)
+`AnnData (.h5ad)` → **Preprocessing** (QC/normalization) → **Clustering** → **CellOracle** (GRN inference) + **Hotspot** (gene modules) → **Deep Analysis** (visualization) → **Reporting** (HTML/PDF)
 
 ### Key Components
 
@@ -19,6 +19,7 @@
 | `trnspot/celloracle_processing.py` | GRN inference with CellOracle                     |
 | `trnspot/hotspot_processing.py`    | Spatial autocorrelation modules                   |
 | `trnspot/grn_deep_analysis.py`     | Network visualization (NetworkX, Marsilea)        |
+| `trnspot/reporting/`               | HTML/PDF report generation module                 |
 
 ## Critical Patterns
 
@@ -106,11 +107,47 @@ When adding new config parameters, add corresponding tests to `tests/test_config
 ```
 output/
 ├── preprocessed_adata.h5ad
+├── report.html                  # Interactive HTML report
+├── report.pdf                   # PDF report (requires weasyprint)
 ├── logs/{pipeline.log, error.log, *.checkpoint}
+├── figures/{qc/, grn/, hotspot/}
 ├── celloracle/{grn_merged_scores.csv, grn_filtered_links.pkl}
 ├── hotspot/{autocorrelation_results.csv, gene_modules.csv}
 └── stratified_analysis/<ClusterName>/  # Per-cluster results
 ```
+
+## Reporting Module
+
+Generate comprehensive HTML/PDF reports with the `trnspot.reporting` module:
+
+```python
+from trnspot.reporting import generate_report
+
+# Generate both HTML and PDF reports
+outputs = generate_report(
+    output_dir="results/",
+    title="My Analysis Report",
+    subtitle="Sample Dataset Analysis",
+    adata=adata,
+    celloracle_result=(oracle, links),
+    hotspot_result=hs,
+    log_file="results/logs/pipeline.log",
+)
+print(f"HTML: {outputs['html']}")
+print(f"PDF: {outputs.get('pdf', 'Not generated')}")
+```
+
+### Report Contents
+
+- **Input Data Summary**: Dataset dimensions, annotations, embeddings
+- **Configuration Settings**: All parameters used in the analysis
+- **QC Section**: Quality control metrics and filtering results
+- **Preprocessing**: Normalization and HVG selection details
+- **Clustering**: Cluster sizes and visualization
+- **CellOracle GRN**: Network analysis results and TF rankings
+- **Hotspot Modules**: Gene module analysis
+- **Operations Log**: Complete pipeline execution log
+- **Plot Gallery**: Interactive gallery with lightbox navigation
 
 ## AnnData Conventions
 

@@ -1,0 +1,735 @@
+"""
+Report Section Builders for TRNspot
+===================================
+
+Functions to create individual report sections with detailed information.
+"""
+
+import os
+import glob
+import re
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+from pathlib import Path
+
+from .generator import ReportSection
+from .. import config
+
+
+def _find_figures(
+    output_dir: str,
+    subdirs: List[str],
+    patterns: List[str] = ["*.png", "*.jpg", "*.svg"],
+    max_figures: int = 20,
+) -> List[str]:
+    """Find figure files in specified subdirectories."""
+    figures = []
+    for subdir in subdirs:
+        search_dir = os.path.join(output_dir, subdir)
+        if not os.path.exists(search_dir):
+            continue
+        for pattern in patterns:
+            # Search recursively
+            figures.extend(
+                glob.glob(os.path.join(search_dir, "**", pattern), recursive=True)
+            )
+    return sorted(set(figures))[:max_figures]
+
+
+def _format_number(value) -> str:
+    """Format a number for display."""
+    if isinstance(value, float):
+        if value >= 1000:
+            return f"{value:,.0f}"
+        elif value >= 1:
+            return f"{value:.2f}"
+        else:
+            return f"{value:.4f}"
+    elif isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
+
+
+def create_data_summary_section(
+    adata,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Input Data Summary section.
+
+    Shows information about the input dataset including dimensions,
+    data types, and available annotations.
+    """
+    # Basic metrics
+    metrics = {
+        "Total Cells": adata.n_obs,
+        "Total Genes": adata.n_vars,
+    }
+
+    # Count layers
+    if adata.layers:
+        metrics["Data Layers"] = len(adata.layers)
+
+    # Build content
+    content_parts = []
+
+    # Dataset dimensions
+    content_parts.append(
+        """
+    <h3>📊 Dataset Overview</h3>
+    <p>Summary of the input single-cell RNA-seq dataset.</p>
+    """
+    )
+
+    # Observation annotations table
+    if adata.obs.columns.any():
+        obs_rows = []
+        for col in adata.obs.columns[:15]:  # Limit to 15 columns
+            dtype = str(adata.obs[col].dtype)
+            n_unique = adata.obs[col].nunique()
+            sample_vals = ", ".join(str(x) for x in adata.obs[col].unique()[:3])
+            if len(adata.obs[col].unique()) > 3:
+                sample_vals += "..."
+            obs_rows.append([col, dtype, n_unique, sample_vals])
+
+        content_parts.append("<h3>🏷️ Cell Annotations (obs)</h3>")
+        content_parts.append(
+            f"<p>Found {len(adata.obs.columns)} annotation columns:</p>"
+        )
+
+    # Variable annotations
+    if adata.var.columns.any():
+        var_cols = list(adata.var.columns[:10])
+        content_parts.append("<h3>🧬 Gene Annotations (var)</h3>")
+        content_parts.append(
+            f"<p>Found {len(adata.var.columns)} gene annotation columns: <code>{', '.join(var_cols)}</code></p>"
+        )
+
+    # Embeddings
+    if adata.obsm:
+        embeddings = []
+        for key in adata.obsm.keys():
+            shape = adata.obsm[key].shape
+            embeddings.append(f"<code>{key}</code> ({shape[1]} dims)")
+        content_parts.append("<h3>🗺️ Embeddings (obsm)</h3>")
+        content_parts.append(f"<p>Available embeddings: {', '.join(embeddings)}</p>")
+
+    # Layers
+    if adata.layers:
+        layers = [f"<code>{key}</code>" for key in adata.layers.keys()]
+        content_parts.append("<h3>📚 Data Layers</h3>")
+        content_parts.append(f"<p>Available layers: {', '.join(layers)}</p>")
+
+    # Tables
+    tables = []
+    if adata.obs.columns.any():
+        tables.append(
+            {
+                "title": "Cell Annotation Columns",
+                "headers": ["Column", "Data Type", "Unique Values", "Sample Values"],
+                "rows": obs_rows if "obs_rows" in dir() else [],
+            }
+        )
+
+    return ReportSection(
+        title="📂 Input Data Summary",
+        section_id="data-summary",
+        content="\n".join(content_parts),
+        metrics=metrics,
+        tables=tables,
+    )
+
+
+def create_settings_section() -> ReportSection:
+    """
+    Create Configuration Settings section.
+
+    Shows all configuration parameters used in the analysis.
+    """
+    cfg = config.get_config()
+
+    # Organize settings by category
+    categories = {
+        "Quality Control": {
+            "Min Genes per Cell": cfg.get("QC_MIN_GENES"),
+            "Min Counts per Cell": cfg.get("QC_MIN_COUNTS"),
+            "Max MT %": cfg.get("QC_PCT_MT_MAX"),
+            "Min Cells per Gene": cfg.get("QC_MIN_CELLS"),
+        },
+        "Preprocessing": {
+            "Normalization Target": _format_number(cfg.get("NORMALIZE_TARGET_SUM")),
+            "HVG Count": cfg.get("HVGS_N_TOP_GENES"),
+            "HVG Min Mean": cfg.get("HVGS_MIN_MEAN"),
+            "HVG Max Mean": cfg.get("HVGS_MAX_MEAN"),
+        },
+        "Dimensionality Reduction": {
+            "PCA Components": cfg.get("PCA_N_COMPS"),
+            "UMAP Min Distance": cfg.get("UMAP_MIN_DIST"),
+            "UMAP Components": cfg.get("UMAP_N_COMPONENTS"),
+        },
+        "Clustering": {
+            "N Neighbors": cfg.get("NEIGHBORS_N_NEIGHBORS"),
+            "N PCs Used": cfg.get("NEIGHBORS_N_PCS"),
+            "Leiden Resolution": cfg.get("LEIDEN_RESOLUTION"),
+        },
+        "GRN Analysis": {
+            "N Jobs": cfg.get("GRN_N_JOBS"),
+            "Min Targets": cfg.get("GRN_MIN_TARGETS"),
+            "Confidence Threshold": cfg.get("GRN_CONFIDENCE_THRESHOLD"),
+        },
+        "Hotspot Analysis": {
+            "N Neighbors": cfg.get("HOTSPOT_N_NEIGHBORS", 30),
+            "FDR Threshold": cfg.get("HOTSPOT_FDR_THRESHOLD", 0.05),
+            "Top Genes": cfg.get("HOTSPOT_TOP_GENES", 3000),
+        },
+        "Output": {
+            "Output Directory": cfg.get("OUTPUT_DIR"),
+            "Plot DPI": cfg.get("PLOT_DPI"),
+            "Save DPI": cfg.get("SAVE_DPI", 600),
+            "Random Seed": cfg.get("RANDOM_SEED"),
+        },
+    }
+
+    # Build HTML content
+    content_parts = ['<div class="settings-grid">']
+
+    for category, settings in categories.items():
+        settings_html = ""
+        for key, value in settings.items():
+            if value is not None:
+                settings_html += f"<dt>{key}</dt><dd>{value}</dd>"
+
+        content_parts.append(
+            f"""
+        <div class="settings-category">
+            <h4>⚙️ {category}</h4>
+            <dl>{settings_html}</dl>
+        </div>
+        """
+        )
+
+    content_parts.append("</div>")
+
+    return ReportSection(
+        title="⚙️ Configuration Settings",
+        section_id="settings",
+        content="\n".join(content_parts),
+    )
+
+
+def create_qc_section(
+    adata,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Quality Control section.
+
+    Shows QC metrics and filtering results.
+    """
+    metrics = {}
+
+    # Collect QC metrics if available
+    if "n_genes_by_counts" in adata.obs.columns:
+        metrics["Median Genes/Cell"] = int(adata.obs["n_genes_by_counts"].median())
+        metrics["Mean Genes/Cell"] = int(adata.obs["n_genes_by_counts"].mean())
+
+    if "total_counts" in adata.obs.columns:
+        metrics["Median Counts/Cell"] = int(adata.obs["total_counts"].median())
+
+    if "pct_counts_mt" in adata.obs.columns:
+        metrics["Mean MT %"] = round(adata.obs["pct_counts_mt"].mean(), 2)
+        metrics["Max MT %"] = round(adata.obs["pct_counts_mt"].max(), 2)
+
+    metrics["Cells After QC"] = adata.n_obs
+    metrics["Genes After QC"] = adata.n_vars
+
+    content = """
+    <p>Quality control was performed to filter out low-quality cells and uninformative genes.
+    The following metrics were calculated and filtering thresholds applied:</p>
+
+    <h3>📋 QC Metrics Calculated</h3>
+    <ul>
+        <li><strong>n_genes_by_counts:</strong> Number of genes with at least 1 count per cell</li>
+        <li><strong>total_counts:</strong> Total number of counts per cell</li>
+        <li><strong>pct_counts_mt:</strong> Percentage of counts from mitochondrial genes</li>
+    </ul>
+
+    <h3>🔍 Filtering Criteria</h3>
+    <ul>
+        <li>Removed cells with too few detected genes</li>
+        <li>Removed cells with abnormally low/high total counts</li>
+        <li>Removed cells with high mitochondrial content (potential dying cells)</li>
+        <li>Removed genes expressed in too few cells</li>
+    </ul>
+    """
+
+    # Find QC figures
+    figures = _find_figures(output_dir, ["figures/qc", "qc"])
+
+    return ReportSection(
+        title="🔬 Quality Control",
+        section_id="qc",
+        content=content,
+        figures=figures,
+        metrics=metrics,
+    )
+
+
+def create_preprocessing_section(
+    adata,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Preprocessing section.
+
+    Shows normalization, HVG selection, and scaling steps.
+    """
+    metrics = {}
+
+    # Check for HVGs
+    if "highly_variable" in adata.var.columns:
+        n_hvg = int(adata.var["highly_variable"].sum())
+        metrics["Highly Variable Genes"] = n_hvg
+
+    # Check for normalization
+    if "log1p" in adata.uns:
+        metrics["Log Transformed"] = "Yes"
+
+    content = """
+    <p>Data preprocessing was performed to normalize and prepare the data for downstream analysis.</p>
+
+    <h3>📊 Preprocessing Steps</h3>
+    <ol>
+        <li><strong>Normalization:</strong> Library size normalization to account for differences in sequencing depth</li>
+        <li><strong>Log transformation:</strong> Log(x + 1) transformation to stabilize variance</li>
+        <li><strong>Highly Variable Genes:</strong> Selection of genes with high cell-to-cell variation</li>
+        <li><strong>Scaling:</strong> Z-score scaling for PCA computation</li>
+    </ol>
+
+    <h3>💡 Technical Details</h3>
+    <ul>
+        <li>Normalization target sum: 10,000 counts per cell (CPM-like)</li>
+        <li>HVG selection method: Seurat v3 (highly_variable_genes with flavor='seurat_v3')</li>
+        <li>Raw counts preserved in <code>adata.layers['raw_count']</code> for downstream tools</li>
+    </ul>
+    """
+
+    return ReportSection(
+        title="🔧 Preprocessing",
+        section_id="preprocessing",
+        content=content,
+        metrics=metrics,
+    )
+
+
+def create_clustering_section(
+    adata,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Clustering & Visualization section.
+    """
+    metrics = {}
+
+    # Check for clustering results
+    cluster_key = None
+    if "leiden" in adata.obs.columns:
+        cluster_key = "leiden"
+        n_clusters = len(adata.obs["leiden"].unique())
+        metrics["Clusters (Leiden)"] = n_clusters
+    elif "louvain" in adata.obs.columns:
+        cluster_key = "louvain"
+        n_clusters = len(adata.obs["louvain"].unique())
+        metrics["Clusters (Louvain)"] = n_clusters
+
+    # Check embeddings
+    if "X_pca" in adata.obsm:
+        metrics["PCA Components"] = adata.obsm["X_pca"].shape[1]
+
+    if "X_umap" in adata.obsm:
+        metrics["UMAP Computed"] = "Yes"
+
+    # Cluster sizes table
+    tables = []
+    if cluster_key:
+        cluster_counts = adata.obs[cluster_key].value_counts().sort_index()
+        rows = [
+            [str(cluster), count, f"{100*count/adata.n_obs:.1f}%"]
+            for cluster, count in cluster_counts.items()
+        ]
+        tables.append(
+            {
+                "title": f"Cluster Sizes ({cluster_key.title()} Clustering)",
+                "headers": ["Cluster", "Cell Count", "Percentage"],
+                "rows": rows,
+            }
+        )
+
+    content = """
+    <p>Dimensionality reduction and clustering were performed to identify cell populations.</p>
+
+    <h3>📉 Dimensionality Reduction</h3>
+    <ol>
+        <li><strong>PCA:</strong> Principal Component Analysis for initial dimensionality reduction</li>
+        <li><strong>Neighbor Graph:</strong> K-nearest neighbor graph construction</li>
+        <li><strong>UMAP:</strong> Uniform Manifold Approximation and Projection for 2D visualization</li>
+    </ol>
+
+    <h3>🎯 Clustering</h3>
+    <p>Graph-based clustering using the Leiden algorithm was applied to identify cell populations
+    with similar transcriptional profiles.</p>
+    """
+
+    figures = _find_figures(output_dir, ["figures", "figures/qc"], max_figures=10)
+
+    return ReportSection(
+        title="🎨 Clustering & Visualization",
+        section_id="clustering",
+        content=content,
+        figures=figures,
+        metrics=metrics,
+        tables=tables,
+    )
+
+
+def create_celloracle_section(
+    celloracle_result,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create CellOracle GRN Analysis section.
+    """
+    metrics = {}
+
+    if celloracle_result is not None:
+        oracle, links = celloracle_result
+
+        if hasattr(links, "merged_score") and links.merged_score is not None:
+            merged_scores = links.merged_score
+            if "cluster" in merged_scores.columns:
+                metrics["Clusters Analyzed"] = len(merged_scores["cluster"].unique())
+
+            # Count unique TFs
+            if hasattr(merged_scores, "index"):
+                metrics["Transcription Factors"] = len(merged_scores.index.unique())
+
+        if hasattr(links, "filtered_links") and links.filtered_links is not None:
+            if isinstance(links.filtered_links, dict):
+                total_links = sum(
+                    len(v)
+                    for v in links.filtered_links.values()
+                    if hasattr(v, "__len__")
+                )
+                metrics["Regulatory Links"] = total_links
+
+    content = """
+    <p>Gene Regulatory Network (GRN) inference was performed using CellOracle to identify
+    transcription factor regulatory relationships from single-cell expression data.</p>
+
+    <h3>🔬 Analysis Pipeline</h3>
+    <ol>
+        <li><strong>Preprocessing:</strong> Diffusion map computation and PAGA graph construction</li>
+        <li><strong>Oracle Initialization:</strong> Integration of expression data with base GRN from promoter analysis</li>
+        <li><strong>Network Inference:</strong> Ridge regression-based network inference per cluster</li>
+        <li><strong>Centrality Analysis:</strong> Calculation of network centrality scores for TF ranking</li>
+    </ol>
+
+    <h3>📊 Network Scores Computed</h3>
+    <ul>
+        <li><strong>Degree centrality:</strong> Number of connections (in/out/all)</li>
+        <li><strong>Betweenness centrality:</strong> How often a TF lies on shortest paths</li>
+        <li><strong>Eigenvector centrality:</strong> Influence based on connections to influential nodes</li>
+    </ul>
+
+    <h3>📁 Output Files</h3>
+    <ul>
+        <li><code>celloracle/oracle_object.celloracle.oracle</code> - Oracle object</li>
+        <li><code>celloracle/oracle_object.celloracle.links</code> - Links object</li>
+        <li><code>celloracle/grn_merged_scores.csv</code> - Network centrality scores</li>
+        <li><code>celloracle/grn_filtered_links.pkl</code> - Filtered regulatory links</li>
+    </ul>
+    """
+
+    figures = _find_figures(
+        output_dir,
+        ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
+        max_figures=30,
+    )
+
+    return ReportSection(
+        title="🧬 CellOracle GRN Analysis",
+        section_id="celloracle",
+        content=content,
+        figures=figures,
+        metrics=metrics,
+    )
+
+
+def create_hotspot_section(
+    hotspot_result,
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Hotspot Gene Module section.
+    """
+    metrics = {}
+
+    if hotspot_result is not None:
+        if hasattr(hotspot_result, "results") and hotspot_result.results is not None:
+            n_tested = len(hotspot_result.results)
+            n_significant = (hotspot_result.results["FDR"] < 0.05).sum()
+            metrics["Genes Tested"] = n_tested
+            metrics["Significant Genes"] = int(n_significant)
+
+        if hasattr(hotspot_result, "modules") and hotspot_result.modules is not None:
+            n_modules = len([m for m in hotspot_result.modules.unique() if m != -1])
+            metrics["Gene Modules"] = n_modules
+
+    content = """
+    <p>Hotspot analysis was performed to identify groups of genes that show spatially
+    coordinated expression patterns across cells.</p>
+
+    <h3>🔬 Analysis Steps</h3>
+    <ol>
+        <li><strong>KNN Graph:</strong> Cell-cell similarity graph construction from PCA space</li>
+        <li><strong>Autocorrelation:</strong> Testing genes for local autocorrelation using Geary's C</li>
+        <li><strong>Local Correlations:</strong> Computing pairwise gene correlations within local neighborhoods</li>
+        <li><strong>Module Detection:</strong> Hierarchical clustering of correlated genes into modules</li>
+    </ol>
+
+    <h3>📊 Module Analysis</h3>
+    <p>Gene modules represent co-expressed gene programs that may correspond to biological
+    processes, cell states, or regulatory programs.</p>
+
+    <h3>📁 Output Files</h3>
+    <ul>
+        <li><code>hotspot/autocorrelation_results.csv</code> - Gene autocorrelation statistics</li>
+        <li><code>hotspot/significant_genes.csv</code> - Significantly autocorrelated genes</li>
+        <li><code>hotspot/gene_modules.csv</code> - Gene-to-module assignments</li>
+        <li><code>hotspot/hotspot_module_scores.csv</code> - Module scores per cell</li>
+    </ul>
+    """
+
+    figures = _find_figures(output_dir, ["figures/hotspot", "hotspot"], max_figures=20)
+
+    return ReportSection(
+        title="🔥 Hotspot Gene Modules",
+        section_id="hotspot",
+        content=content,
+        figures=figures,
+        metrics=metrics,
+    )
+
+
+def create_operations_log_section(
+    log_file: str,
+) -> ReportSection:
+    """
+    Create Operations Log section from pipeline log file.
+    """
+    log_entries = []
+
+    try:
+        with open(log_file, "r") as f:
+            for line in f:
+                # Parse log entries
+                match = re.match(
+                    r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ - (\w+) - (.+)",
+                    line.strip(),
+                )
+                if match:
+                    timestamp, level, message = match.groups()
+                    log_entries.append(
+                        {
+                            "timestamp": timestamp,
+                            "level": level,
+                            "message": message,
+                        }
+                    )
+    except Exception as e:
+        log_entries = [
+            {
+                "timestamp": "",
+                "level": "ERROR",
+                "message": f"Could not read log file: {e}",
+            }
+        ]
+
+    # Build log HTML
+    log_html = ['<div class="operations-log">']
+
+    for entry in log_entries[-100:]:  # Last 100 entries
+        level = entry.get("level", "INFO")
+        if level == "ERROR":
+            status_class = "status-error"
+        elif "COMPLETED" in entry.get("message", ""):
+            status_class = "status-completed"
+        elif "SKIPPED" in entry.get("message", ""):
+            status_class = "status-skipped"
+        else:
+            status_class = ""
+
+        log_html.append(
+            f"""
+        <div class="log-entry">
+            <span class="timestamp">{entry.get('timestamp', '')}</span>
+            <span class="step">{entry.get('message', '')}</span>
+            <span class="status-badge {status_class}">{level}</span>
+        </div>
+        """
+        )
+
+    log_html.append("</div>")
+
+    content = f"""
+    <p>Complete log of all operations performed during the pipeline execution.</p>
+    <p><strong>Log file:</strong> <code>{log_file}</code></p>
+    <p><strong>Showing:</strong> Last {min(100, len(log_entries))} entries</p>
+
+    {"".join(log_html)}
+    """
+
+    return ReportSection(
+        title="📜 Operations Log",
+        section_id="operations-log",
+        content=content,
+    )
+
+
+def create_plot_gallery_section(
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create a comprehensive plot gallery section.
+    """
+    # Find all figures organized by category
+    subsections = []
+
+    # QC plots
+    qc_figures = _find_figures(output_dir, ["figures/qc", "qc"], max_figures=15)
+    if qc_figures:
+        subsections.append(
+            ReportSection(
+                title="Quality Control Plots",
+                section_id="gallery-qc",
+                content="<p>Visualizations of quality control metrics and filtering results.</p>",
+                figures=qc_figures,
+            )
+        )
+
+    # Embedding/clustering plots
+    embedding_patterns = ["*umap*", "*pca*", "*cluster*", "*leiden*"]
+    embedding_figures = []
+    for pattern in embedding_patterns:
+        embedding_figures.extend(
+            glob.glob(os.path.join(output_dir, "figures", pattern), recursive=False)
+        )
+        embedding_figures.extend(
+            glob.glob(
+                os.path.join(output_dir, "figures", "**", pattern), recursive=True
+            )
+        )
+
+    embedding_figures = sorted(
+        set([f for f in embedding_figures if os.path.isfile(f)])
+    )[:15]
+    if embedding_figures:
+        subsections.append(
+            ReportSection(
+                title="Embedding & Clustering Plots",
+                section_id="gallery-embedding",
+                content="<p>UMAP, PCA, and clustering visualizations.</p>",
+                figures=embedding_figures,
+            )
+        )
+
+    # GRN plots
+    grn_figures = _find_figures(
+        output_dir,
+        ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
+        max_figures=30,
+    )
+    if grn_figures:
+        subsections.append(
+            ReportSection(
+                title="GRN Analysis Plots",
+                section_id="gallery-grn",
+                content="<p>Gene regulatory network analysis visualizations including network scores and comparisons.</p>",
+                figures=grn_figures,
+            )
+        )
+
+    # Hotspot plots
+    hotspot_figures = _find_figures(
+        output_dir, ["figures/hotspot", "hotspot"], max_figures=20
+    )
+    if hotspot_figures:
+        subsections.append(
+            ReportSection(
+                title="Hotspot Module Plots",
+                section_id="gallery-hotspot",
+                content="<p>Gene module analysis visualizations.</p>",
+                figures=hotspot_figures,
+            )
+        )
+
+    # Count total figures
+    total_figures = sum(len(s.figures) for s in subsections)
+
+    content = f"""
+    <p>Interactive gallery of all plots generated during the analysis.
+    Click on any image to view it in full size. Use arrow keys or buttons to navigate.</p>
+    <p><strong>Total plots:</strong> {total_figures}</p>
+    """
+
+    return ReportSection(
+        title="🖼️ Plot Gallery",
+        section_id="plot-gallery",
+        content=content,
+        subsections=subsections,
+    )
+
+
+def create_stratification_summary_section(
+    stratification_names: List[str],
+    output_dir: str,
+) -> ReportSection:
+    """
+    Create Stratified Analysis Summary section.
+    """
+    n_strats = len(stratification_names)
+
+    # Build stratification list with links
+    strat_items = []
+    for name in stratification_names:
+        strat_dir = os.path.join(output_dir, "stratified_analysis", name)
+        if os.path.exists(strat_dir):
+            strat_items.append(
+                f"<li>✅ <strong>{name}</strong> - Analysis completed</li>"
+            )
+        else:
+            strat_items.append(f"<li>⏳ <strong>{name}</strong> - Pending</li>")
+
+    content = f"""
+    <p>The data was stratified into {n_strats} subsets for independent analysis.
+    Each stratification was processed through the full analysis pipeline.</p>
+
+    <h3>📊 Stratifications Analyzed</h3>
+    <ul>{"".join(strat_items)}</ul>
+
+    <h3>📁 Output Structure</h3>
+    <p>Results for each stratification are saved in:</p>
+    <pre><code>{output_dir}/stratified_analysis/&lt;stratification_name&gt;/
+├── clustered_adata.h5ad
+├── celloracle/
+├── hotspot/
+├── figures/
+└── logs/</code></pre>
+    """
+
+    return ReportSection(
+        title="📂 Stratified Analysis Summary",
+        section_id="stratification",
+        content=content,
+        metrics={"Stratifications": n_strats},
+    )

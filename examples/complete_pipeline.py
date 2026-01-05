@@ -37,6 +37,7 @@ from trnspot.preprocessing import (
     perform_dimensionality_reduction_clustering,
     ensure_categorical_obs,
 )
+from trnspot.reporting import generate_report
 
 
 # Global logger instances
@@ -351,6 +352,45 @@ class PipelineController:
             log_error("Controller.GRNAnalysis", e)
             raise
 
+    def run_step_report(
+        self,
+        output_dir,
+        adata=None,
+        celloracle_result=None,
+        hotspot_result=None,
+        title="TRNspot Analysis Report",
+        subtitle="",
+    ):
+        """Execute Step 7: Generate HTML/PDF Report."""
+        log_step("Controller.Report", "STARTED", {"output_dir": output_dir})
+        try:
+            log_file = os.path.join(output_dir, "logs", "pipeline.log")
+            if not os.path.exists(log_file):
+                log_file = None
+
+            outputs = generate_report(
+                output_dir=output_dir,
+                title=title,
+                subtitle=subtitle,
+                adata=adata,
+                celloracle_result=celloracle_result,
+                hotspot_result=hotspot_result,
+                log_file=log_file,
+                formats=["html", "pdf"],
+            )
+
+            log_step(
+                "Controller.Report",
+                "COMPLETED",
+                {"html": outputs.get("html"), "pdf": outputs.get("pdf")},
+            )
+            return outputs
+        except Exception as e:
+            log_error("Controller.Report", e)
+            # Don't raise - report generation failure shouldn't stop pipeline
+            print(f"  ⚠ Report generation failed: {e}")
+            return {}
+
     def process_single_stratification(self, adata_cluster, stratification_name):
         """Process a single stratified dataset."""
         # Create stratified folder INSIDE the main output directory
@@ -409,6 +449,16 @@ class PipelineController:
         if os.path.exists(grn_score_file) and os.path.exists(grn_links_file):
             grn_deep_analysis_pipeline(grn_score_file, grn_links_file)
 
+        # Generate report for this stratification
+        self.run_step_report(
+            output_dir=stratified_output_dir,
+            adata=adata_clustered,
+            celloracle_result=celloracle_result,
+            hotspot_result=hotspot_result,
+            title="TRNspot Analysis Report",
+            subtitle=f"Stratification: {stratification_name}",
+        )
+
         return stratified_output_dir
 
     def run_stratified_pipeline_sequential(self):
@@ -432,7 +482,7 @@ class PipelineController:
         steps : list of str, optional
             Specific steps to run. Options:
             'load', 'preprocessing', 'stratification', 'clustering',
-            'celloracle', 'hotspot', 'grn_analysis', 'summary'
+            'celloracle', 'hotspot', 'grn_analysis', 'report', 'summary'
             If None, runs all steps.
         """
         if steps is None:
@@ -444,6 +494,7 @@ class PipelineController:
                 "celloracle",
                 "hotspot",
                 "grn_analysis",
+                "report",
                 "summary",
             ]
 
@@ -498,6 +549,17 @@ class PipelineController:
                 if os.path.exists(grn_score_file) and os.path.exists(grn_links_file):
                     self.run_step_grn_analysis(grn_score_file, grn_links_file)
 
+            # Generate report
+            if "report" in steps:
+                self.run_step_report(
+                    output_dir=self.args.output,
+                    adata=adata_clustered,
+                    celloracle_result=celloracle_result,
+                    hotspot_result=hotspot_result,
+                    title="TRNspot Analysis Report",
+                    subtitle=self.args.input or "Example Dataset",
+                )
+
         # Final summary
         if "summary" in steps:
             self.print_final_summary()
@@ -538,6 +600,24 @@ class PipelineController:
                 total_merged_scores = merge_scores(tracked_files_path)
                 plot_heatmap_scores(total_merged_scores)
                 print("  ✓ Generated overall GRN deep analysis heatmap")
+
+        # Generate overall report for stratified analysis
+        if self.adata_stratification_list:
+            try:
+                outputs = generate_report(
+                    output_dir=self.args.output,
+                    title="TRNspot Analysis Report",
+                    subtitle=f"Stratified Analysis ({len(self.adata_stratification_list)} stratifications)",
+                    adata=self.adata_preprocessed,
+                    log_file=os.path.join(self.args.output, "logs", "pipeline.log"),
+                    formats=["html", "pdf"],
+                )
+                if outputs.get("html"):
+                    print(f"  ✓ Generated overall HTML report: {outputs['html']}")
+                if outputs.get("pdf"):
+                    print(f"  ✓ Generated overall PDF report: {outputs['pdf']}")
+            except Exception as e:
+                print(f"  ⚠ Overall report generation failed: {e}")
 
 
 def setup_directories(output_dir, figures_dir, debug=False):

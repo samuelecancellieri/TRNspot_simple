@@ -96,3 +96,5 @@ data/
 *.checkpoint
 *.log
 trnspot/play.ipynb
+*report.html
+*report.pdf
