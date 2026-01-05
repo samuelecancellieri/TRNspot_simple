@@ -142,38 +142,38 @@ def plot_network_graph(
     for score in scores:
         top_genes_by_cluster = pd.DataFrame()
         filtered_links_df = pd.DataFrame()
-        for cluster in score_df["cluster"].unique():
-            cluster_str = str(cluster)
+        for cluster in score_df["cluster"].unique().tolist():
+            # cluster_str = str(cluster)
             cluster_scores = score_df.query(f"cluster == '{cluster_str}'").copy()
 
             # Skip if no data for this cluster/score combination
             if cluster_scores.empty or cluster_scores[score].dropna().empty:
-            print(
-                f"  Warning: No data for cluster '{cluster_str}' and score '{score}', skipping..."
-            )
-            continue
+                print(
+                    f"  Warning: No data for cluster '{cluster_str}' and score '{score}', skipping..."
+                )
+                continue
 
             percentile = np.percentile(cluster_scores[score].dropna(), 90)
             cluster_scores = cluster_scores.query(f"{score} > {percentile}")
 
             if cluster_scores.empty:
-            continue
+                continue
 
             cluster_scores["gene"] = cluster_scores.index
             top_genes_by_cluster = pd.concat(
-            [top_genes_by_cluster, cluster_scores], axis=0
+                [top_genes_by_cluster, cluster_scores], axis=0
             )
 
             filtered_links_cluster = links_df[links_df["cluster"] == cluster_str]
             filtered_links_cluster = filtered_links_cluster[
-            filtered_links_cluster["source"].isin(
-                top_genes_by_cluster.query("cluster==@cluster_str")["gene"]
-            )
+                filtered_links_cluster["source"].isin(
+                    top_genes_by_cluster.query("cluster==@cluster_str")["gene"]
+                )
             ]
             filtered_links_cluster["cluster"] = cluster_str
             filtered_links_cluster = filtered_links_cluster.nlargest(20, "coef_abs")
             filtered_links_df = pd.concat(
-            [filtered_links_df, filtered_links_cluster], axis=0
+                [filtered_links_df, filtered_links_cluster], axis=0
             )
 
         # Skip if no data collected
