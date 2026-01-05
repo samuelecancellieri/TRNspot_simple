@@ -139,10 +139,11 @@ def plot_network_graph(
     """
 
     # print(score_df.head())
+    score_df["cluster"] = score_df["cluster"].astype("category")
     for score in scores:
         top_genes_by_cluster = pd.DataFrame()
         filtered_links_df = pd.DataFrame()
-        for cluster in score_df["cluster"].unique().tolist():
+        for cluster in score_df["cluster"].unique():
             cluster_str = str(cluster)
             cluster_scores = score_df.query(f"cluster == '{cluster_str}'").copy()
 
