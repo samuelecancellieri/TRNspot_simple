@@ -331,6 +331,7 @@ class PipelineController:
                 layer_key=self.args.raw_count_layer,
                 embedding_key=self.args.embedding_hotspot,
                 normalization_key=self.args.normalization_key,
+                cluster_key=self.args.cluster_key,
                 skip_hotspot=self.args.skip_hotspot,
                 log_dir=log_dir,
             )
@@ -1049,6 +1050,7 @@ def hotspot_pipeline(
     layer_key="raw_counts",
     embedding_key="X_pca",
     normalization_key="n_counts",
+    cluster_key="leiden",
     skip_hotspot=False,
     log_dir=None,
 ):
@@ -1115,7 +1117,9 @@ def hotspot_pipeline(
             log_step("Hotspot.Analysis", "STARTED")
             print("\n[5.2] Running Hotspot analysis...")
             print("  (This may take several minutes...)")
-            hotspot_obj = run_hotspot_analysis(hotspot_obj)
+            hotspot_obj = run_hotspot_analysis(
+                hotspot_obj, adata=adata, cluster_key=cluster_key
+            )
             print("  ✓ Hotspot analysis complete")
 
             # Get results summary
