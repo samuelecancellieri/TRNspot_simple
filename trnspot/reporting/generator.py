@@ -1010,7 +1010,7 @@ def generate_report(
     return outputs
 
 
-def generate_html_report(output_dir: str, embed_images: bool = False, **kwargs) -> str:
+def generate_html_report(output_dir: str, embed_images: bool = True, **kwargs) -> str:
     """Convenience function to generate HTML report only."""
     outputs = generate_report(
         output_dir, formats=["html"], embed_images=embed_images, **kwargs
