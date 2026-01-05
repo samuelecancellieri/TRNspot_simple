@@ -6,19 +6,47 @@
 
 ### Data Flow
 
-`AnnData (.h5ad)` → **Preprocessing** (QC/normalization) → **Clustering** → **CellOracle** (GRN inference) + **Hotspot** (gene modules) → **Deep Analysis** (visualization)
+`AnnData (.h5ad)` → **Preprocessing** (QC/normalization) → **Clustering** → **CellOracle** (GRN inference) + **Hotspot** (gene modules) → **Deep Analysis** (visualization) → **Reporting** (HTML/PDF)
+
+### Package Structure (Modular)
+
+```
+trnspot/
+├── __init__.py              # Main exports
+├── config.py                # SINGLE SOURCE OF TRUTH - all parameters
+├── utils/                   # Utility functions
+│   ├── data.py              # AnnData loading, saving, subsetting
+│   ├── io.py                # File I/O, checkpoints, directories
+│   └── logging.py           # Logging setup, log_step, log_error
+├── execution/               # Pipeline execution
+│   ├── preprocessing.py     # QC, normalization, clustering
+│   ├── celloracle.py        # GRN inference pipeline
+│   └── hotspot.py           # Gene module analysis
+├── plotting/                # Visualization
+│   ├── qc.py                # QC violin/scatter plots
+│   ├── embeddings.py        # UMAP, PCA plots
+│   ├── grn.py               # Network graphs, heatmaps
+│   └── hotspot.py           # Module heatmaps, UMAP overlays
+├── reporting/               # Report generation
+│   ├── generator.py         # ReportGenerator class
+│   └── sections.py          # Section builders
+└── (legacy modules)         # Backward compatibility
+    ├── preprocessing.py
+    ├── celloracle_processing.py
+    ├── hotspot_processing.py
+    └── grn_deep_analysis.py
+```
 
 ### Key Components
 
-| File                               | Purpose                                           |
-| ---------------------------------- | ------------------------------------------------- |
-| `trnspot/config.py`                | **SINGLE SOURCE OF TRUTH** - all parameters       |
-| `examples/complete_pipeline.py`    | `PipelineController` class - central orchestrator |
-| `run_complete_analysis.py`         | Entry point wrapper                               |
-| `trnspot/preprocessing.py`         | Scanpy wrappers (QC, normalize, cluster)          |
-| `trnspot/celloracle_processing.py` | GRN inference with CellOracle                     |
-| `trnspot/hotspot_processing.py`    | Spatial autocorrelation modules                   |
-| `trnspot/grn_deep_analysis.py`     | Network visualization (NetworkX, Marsilea)        |
+| Module                          | Purpose                                           |
+| ------------------------------- | ------------------------------------------------- |
+| `trnspot.config`                | **SINGLE SOURCE OF TRUTH** - all parameters       |
+| `trnspot.utils`                 | Data handling, I/O, logging utilities             |
+| `trnspot.execution`             | Pipeline execution functions                      |
+| `trnspot.plotting`              | Visualization functions                           |
+| `trnspot.reporting`             | HTML/PDF report generation                        |
+| `examples/complete_pipeline.py` | `PipelineController` class - central orchestrator |
 
 ## Critical Patterns
 
@@ -35,7 +63,24 @@ plt.savefig(f"{config.FIGURES_DIR_GRN}/plot.png", dpi=config.SAVE_DPI)
 sc.pp.filter_cells(adata, min_genes=200)
 ```
 
-### 2. Extend PipelineController for New Steps
+### 2. Use Modular Imports
+
+```python
+# ✅ CORRECT - use new modular structure
+from trnspot.utils import load_adata, save_adata, ensure_categorical_obs
+from trnspot.execution import run_full_preprocessing, run_celloracle_pipeline
+from trnspot.plotting import plot_umap, plot_network_graph
+from trnspot.reporting import generate_report
+
+# ✅ Also valid - convenience imports from top level
+from trnspot import (
+    load_adata,
+    run_full_preprocessing,
+    generate_report,
+)
+```
+
+### 3. Extend PipelineController for New Steps
 
 ```python
 # In examples/complete_pipeline.py - add new method:
@@ -53,17 +98,26 @@ def run_step_new_analysis(self, adata, log_dir=None):
 
 **NEVER** create standalone scripts - always integrate into the controller.
 
-### 3. Logging Pattern
+### 4. Logging Pattern
 
 ```python
-from examples.complete_pipeline import log_step, log_error
+from trnspot.utils import log_step, log_error
 
 log_step("MyStep", "STARTED", {"n_cells": adata.n_obs})
 log_step("MyStep", "COMPLETED", {"result_count": len(results)})
 log_error("MyStep", exception)  # Logs to error.log with traceback
 ```
 
-### 4. Function Signatures with Config Defaults
+### 5. Categorical Data Handling
+
+```python
+# Always ensure categorical columns before stratification/grouping
+from trnspot.utils import ensure_categorical_obs
+
+adata = ensure_categorical_obs(adata, columns=["leiden", "celltype"])
+```
+
+### 6. Function Signatures with Config Defaults
 
 ```python
 def my_function(
@@ -92,6 +146,21 @@ python examples/complete_pipeline.py --steps load preprocessing clustering
 python examples/complete_pipeline.py --cluster-key-stratification celltype --parallel --n-jobs 4
 ```
 
+### Generate Reports
+
+```python
+from trnspot.reporting import generate_report
+
+# Generate both HTML and PDF reports
+outputs = generate_report(
+    output_dir="results/",
+    title="My Analysis Report",
+    adata=adata,
+    celloracle_result=(oracle, links),
+    hotspot_result=hs,
+)
+```
+
 ### Testing
 
 ```bash
@@ -106,9 +175,12 @@ When adding new config parameters, add corresponding tests to `tests/test_config
 ```
 output/
 ├── preprocessed_adata.h5ad
+├── report.html                    # HTML report
+├── report.pdf                     # PDF report (if weasyprint installed)
 ├── logs/{pipeline.log, error.log, *.checkpoint}
 ├── celloracle/{grn_merged_scores.csv, grn_filtered_links.pkl}
 ├── hotspot/{autocorrelation_results.csv, gene_modules.csv}
+├── figures/{qc/, grn/, hotspot/}  # All generated plots
 └── stratified_analysis/<ClusterName>/  # Per-cluster results
 ```
 
@@ -117,6 +189,7 @@ output/
 - **Metrics**: `.obs` (per-cell), `.var` (per-gene)
 - **Embeddings**: `.obsm['X_pca']`, `.obsm['X_umap']`
 - **Raw counts**: Store in `.layers['raw_count']` before normalization
+- **Categorical columns**: Use `pd.CategoricalDtype` for cluster/stratification keys
 - **Import**: `import scanpy as sc`, access as `adata`
 
 ## Adding New Config Parameters
