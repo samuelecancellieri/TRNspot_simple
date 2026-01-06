@@ -1,5 +1,10 @@
 """
 Hotspot processing module for TRNspot
+
+This module provides functions for Hotspot analysis of gene expression data.
+
+NOTE: Plotting functions have been moved to trnspot.plotting.hotspot_plots.
+The functions here are kept for backward compatibility but delegate to the new module.
 """
 
 from typing import Optional
@@ -18,6 +23,14 @@ from . import config
 
 from . import enrichment_analysis as ea
 from matplotlib.patches import Patch
+
+# Import from new plotting module for backward compatibility
+from .plotting import plot_exists as _plot_exists
+from .plotting import save_plot
+from .plotting import (
+    plot_module_scores_violin as _new_plot_module_scores_violin,
+    generate_all_hotspot_plots,
+)
 
 
 def plot_hotspot_annotation(
@@ -402,16 +415,19 @@ def run_hotspot_analysis(
     module_scores = hotspot_obj.calculate_module_scores()
     print("  Module scores calculated")
 
-    plt.close("all")
-    hotspot_obj.plot_local_correlations()
-    plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
-    plt.close()
+    # Generate all Hotspot plots using the new plotting module
+    print("\n  Generating Hotspot visualizations...")
+    plot_results = generate_all_hotspot_plots(
+        hotspot_obj,
+        adata=adata,
+        cluster_key=cluster_key,
+        skip_existing=False,  # Always regenerate for fresh analysis
+    )
 
-    plot_hotspot_annotation(hotspot_obj)
-
-    # Plot module scores violin plots per cluster
-    if adata is not None and cluster_key in adata.obs.columns:
-        plot_module_scores_violin(hotspot_obj, adata, cluster_key)
+    # Report which plots were generated
+    generated = [k for k, v in plot_results.items() if v is True]
+    if generated:
+        print(f"  Generated plots: {', '.join(generated)}")
 
     save_hotspot_results(hotspot_obj)
 

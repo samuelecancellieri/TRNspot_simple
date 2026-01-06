@@ -1,3 +1,12 @@
+"""
+GRN Deep Analysis module for TRNspot
+
+This module provides functions for deep analysis of Gene Regulatory Networks (GRN).
+
+NOTE: Plotting functions have been moved to trnspot.plotting.grn_plots.
+The functions here are kept for backward compatibility but delegate to the new module.
+"""
+
 import os
 import pickle
 import scanpy as sc
@@ -16,10 +25,16 @@ import numpy as np
 
 from . import config
 
+# Import from new plotting module for backward compatibility
+from .plotting import plot_exists as _plot_exists_new
+from .plotting import save_plot
+
 
 def _plot_exists(filepath: str, skip_existing: bool = True) -> bool:
     """
     Check if a plot file already exists.
+
+    DEPRECATED: Use trnspot.plotting.plot_exists instead.
 
     Args:
         filepath (str): Path to the plot file.
@@ -28,9 +43,7 @@ def _plot_exists(filepath: str, skip_existing: bool = True) -> bool:
     Returns:
         bool: True if file exists and skip_existing is True, False otherwise.
     """
-    if not skip_existing:
-        return False
-    return os.path.exists(filepath)
+    return _plot_exists_new(filepath, skip_existing)
 
 
 def _plot_network_graph_single_score(

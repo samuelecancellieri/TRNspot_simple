@@ -379,45 +379,90 @@ class ReportGenerator:
                 padding: 0;
             }
 
-            /* Figure Gallery */
+            /* Figure Gallery - Compact Thumbnail Grid */
             .gallery {
                 display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                gap: 1.5rem;
-                margin: 1.5rem 0;
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+                gap: 0.75rem;
+                margin: 1rem 0;
+                padding: 1rem;
+                background: var(--background-color);
+                border-radius: 0.5rem;
             }
 
             .gallery-item {
                 background: var(--card-background);
                 border: 1px solid var(--border-color);
-                border-radius: 0.5rem;
+                border-radius: 0.375rem;
                 overflow: hidden;
-                transition: transform 0.2s, box-shadow 0.2s;
+                transition: all 0.2s ease;
                 cursor: pointer;
+                aspect-ratio: 1;
             }
 
             .gallery-item:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+                transform: scale(1.05);
+                box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+                z-index: 10;
+                border-color: var(--primary-color);
             }
 
             .gallery-item img {
                 width: 100%;
-                height: 200px;
+                height: 120px;
                 object-fit: contain;
                 background: #fafafa;
-                padding: 0.5rem;
+                padding: 0.25rem;
             }
 
             .gallery-item .caption {
-                padding: 0.75rem;
-                font-size: 0.85rem;
+                padding: 0.35rem 0.5rem;
+                font-size: 0.7rem;
                 color: var(--text-color);
                 text-align: center;
                 border-top: 1px solid var(--border-color);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                background: var(--card-background);
+            }
+
+            /* Gallery Category Header */
+            .gallery-category {
+                margin: 1.5rem 0 0.5rem 0;
+            }
+
+            .gallery-category-title {
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: var(--secondary-color);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border-color);
+                margin-bottom: 0.5rem;
+            }
+
+            .gallery-category-count {
+                font-size: 0.75rem;
+                font-weight: 400;
+                color: var(--text-light);
+                margin-left: 0.5rem;
+            }
+
+            /* Larger gallery variant for main figures */
+            .gallery-large {
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                gap: 1rem;
+            }
+
+            .gallery-large .gallery-item img {
+                height: 180px;
+            }
+
+            .gallery-large .gallery-item .caption {
+                font-size: 0.8rem;
+                padding: 0.5rem;
             }
 
             /* Subsection Tabs Navigation */

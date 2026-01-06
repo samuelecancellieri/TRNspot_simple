@@ -544,32 +544,61 @@ def create_celloracle_section(
     </ul>
     """
 
-    # Define score categories - ONLY centrality scores, no network graphs or other plots
+    # Define score categories with centrality scores AND difference plots
     score_categories = [
-        ("Eigenvector Centrality", "eigenvector"),
-        ("Betweenness Centrality", "betweenness"),
-        ("Degree Centrality (All)", "degree_centrality_all"),
-        ("Degree Centrality (In)", "degree_centrality_in"),
-        ("Degree Centrality (Out)", "degree_centrality_out"),
+        ("Eigenvector Centrality", "eigenvector", ["eigenvector"]),
+        ("Betweenness Centrality", "betweenness", ["betweenness"]),
+        ("Degree Centrality (All)", "degree_centrality_all", ["degree_centrality_all"]),
+        (
+            "Degree Centrality (In)",
+            "degree_centrality_in",
+            ["degree_centrality_in", "degree_in"],
+        ),
+        (
+            "Degree Centrality (Out)",
+            "degree_centrality_out",
+            ["degree_centrality_out", "degree_out"],
+        ),
+        ("Cluster Comparisons", "comparison", ["compare", "comparison", "scatter"]),
+        ("Difference Analysis", "difference", ["difference", "diff_"]),
+        ("Network Graphs", "network", ["network", "grn_network"]),
     ]
 
     # Collect figures for each score category
     subsections = []
     used_figures = set()
 
-    for display_name, pattern in score_categories:
-        category_figures = _find_grn_figures_by_score(output_dir, pattern)
-        # Remove figures already used in more specific categories
+    for display_name, section_id, patterns in score_categories:
+        category_figures = []
+        for pattern in patterns:
+            figures_for_pattern = _find_grn_figures_by_score(output_dir, pattern)
+            category_figures.extend(figures_for_pattern)
+
+        # Remove duplicates and already used figures
+        category_figures = list(
+            dict.fromkeys(category_figures)
+        )  # preserve order, remove dups
         category_figures = [f for f in category_figures if f not in used_figures]
 
         if category_figures:
             used_figures.update(category_figures)
+
+            # Create descriptive content based on category
+            if "difference" in section_id:
+                desc = f"<p>{len(category_figures)} plots showing score differences between clusters for comparative analysis.</p>"
+            elif "comparison" in section_id:
+                desc = f"<p>{len(category_figures)} scatter plots comparing TF scores across different clusters.</p>"
+            elif "network" in section_id:
+                desc = f"<p>{len(category_figures)} network visualizations showing regulatory connections.</p>"
+            else:
+                desc = f"<p>{len(category_figures)} plots showing {display_name.lower()} scores across clusters.</p>"
+
             subsections.append(
                 ReportSection(
                     title=display_name,
-                    section_id=f"grn-{pattern.replace('_', '-')}",
-                    content=f"<p>{len(category_figures)} plots showing {display_name.lower()} scores across clusters.</p>",
-                    figures=category_figures[:20],
+                    section_id=f"grn-{section_id.replace('_', '-')}",
+                    content=desc,
+                    figures=category_figures[:30],  # Increased limit for galleries
                 )
             )
 
@@ -582,12 +611,38 @@ def create_celloracle_section(
     )
 
 
+def _find_hotspot_figures_by_category(
+    output_dir: str,
+    category: str,
+    max_figures: int = 20,
+) -> List[str]:
+    """
+    Find Hotspot figures for a specific category.
+    """
+    figures = []
+    hotspot_dirs = [
+        os.path.join(output_dir, "figures/hotspot"),
+        os.path.join(output_dir, "hotspot"),
+    ]
+
+    for hs_dir in hotspot_dirs:
+        if not os.path.exists(hs_dir):
+            continue
+        for pattern in ["*.png", "*.jpg", "*.svg"]:
+            for f in glob.glob(os.path.join(hs_dir, "**", pattern), recursive=True):
+                fname_lower = os.path.basename(f).lower()
+                if category.lower() in fname_lower:
+                    figures.append(f)
+
+    return sorted(set(figures))[:max_figures]
+
+
 def create_hotspot_section(
     hotspot_result,
     output_dir: str,
 ) -> ReportSection:
     """
-    Create Hotspot Gene Module section.
+    Create Hotspot Gene Module section with organized galleries.
     """
     metrics = {}
 
@@ -627,14 +682,95 @@ def create_hotspot_section(
     </ul>
     """
 
-    figures = _find_figures(output_dir, ["figures/hotspot", "hotspot"], max_figures=20)
+    # Define hotspot figure categories with specific patterns for violin plots
+    hotspot_categories = [
+        ("Local Correlations", "correlation", ["local_correlation"]),
+        ("Module Heatmaps", "heatmap", ["heatmap", "annotation"]),
+        (
+            "Module Scores - Per Cluster",
+            "violin-per-cluster",
+            ["violin_per_cluster"],
+        ),
+        (
+            "Module Scores - All Clusters",
+            "violin-all",
+            ["violin_all_clusters"],
+        ),
+        (
+            "Module Scores - Horizontal",
+            "violin-horizontal",
+            ["violin_horizontal"],
+        ),
+        ("Other Plots", "other", []),  # Catch-all for remaining figures
+    ]
+
+    subsections = []
+    used_figures = set()
+
+    for display_name, section_id, patterns in hotspot_categories:
+        category_figures = []
+
+        if patterns:
+            for pattern in patterns:
+                figures_for_pattern = _find_hotspot_figures_by_category(
+                    output_dir, pattern
+                )
+                category_figures.extend(figures_for_pattern)
+        else:
+            # "Other" category - get all hotspot figures not yet used
+            all_hotspot_figures = _find_figures(
+                output_dir, ["figures/hotspot", "hotspot"], max_figures=50
+            )
+            category_figures = [f for f in all_hotspot_figures if f not in used_figures]
+
+        # Remove duplicates and already used figures
+        category_figures = list(dict.fromkeys(category_figures))
+        category_figures = [f for f in category_figures if f not in used_figures]
+
+        if category_figures:
+            used_figures.update(category_figures)
+
+            # Custom descriptions for violin plot categories
+            if "violin" in section_id:
+                if "per-cluster" in section_id:
+                    desc = "<p>Violin plots showing module score distributions for each cluster separately with shared axes for comparison.</p>"
+                elif "all" in section_id:
+                    desc = "<p>Combined violin plot showing all clusters side-by-side for each module.</p>"
+                elif "horizontal" in section_id:
+                    desc = "<p>Horizontal violin plot with modules on y-axis for better label readability.</p>"
+                else:
+                    desc = f"<p>{len(category_figures)} {display_name.lower()} visualizations.</p>"
+            else:
+                desc = f"<p>{len(category_figures)} {display_name.lower()} visualizations.</p>"
+
+            subsections.append(
+                ReportSection(
+                    title=display_name,
+                    section_id=f"hotspot-{section_id}",
+                    content=desc,
+                    figures=category_figures[:20],
+                )
+            )
+
+    # If no subsections were created, fall back to single gallery
+    if not subsections:
+        figures = _find_figures(
+            output_dir, ["figures/hotspot", "hotspot"], max_figures=20
+        )
+        return ReportSection(
+            title="Hotspot Gene Modules",
+            section_id="hotspot",
+            content=content,
+            figures=figures,
+            metrics=metrics,
+        )
 
     return ReportSection(
         title="Hotspot Gene Modules",
         section_id="hotspot",
         content=content,
-        figures=figures,
         metrics=metrics,
+        subsections=subsections,
     )
 
 
