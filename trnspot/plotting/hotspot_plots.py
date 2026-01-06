@@ -224,8 +224,17 @@ def plot_hotspot_annotation(
             index=False,
         )
 
-    # Create module colors
-    colors = list(plt.get_cmap("tab10").colors)
+    # Create module colors using a large, distinct color palette
+    # Combine multiple palettes to ensure enough unique colors
+    n_modules_total = len([m for m in hotspot_obj.modules.unique() if m != -1])
+    if n_modules_total <= 10:
+        colors = sns.color_palette("tab10", n_colors=10)
+    elif n_modules_total <= 20:
+        colors = sns.color_palette("tab20", n_colors=20)
+    else:
+        # For many modules, use husl which generates evenly spaced hues
+        colors = sns.color_palette("husl", n_colors=max(n_modules_total, 30))
+
     module_colors = {
         i: colors[(i - 1) % len(colors)] for i in hotspot_obj.modules.unique()
     }
