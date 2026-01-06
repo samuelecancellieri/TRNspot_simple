@@ -280,7 +280,7 @@ def create_hotspot_object(
 
     # create a csv matrix from the specified layer or from adata.X
     if layer_key:
-        print("Using layer counts for Hotspot analysis.")
+        print(f"Using layer {layer_key} for Hotspot analysis.")
         adata_cc.layers[f"csc_{layer_key}"] = csc_matrix(adata_cc.layers[layer_key])
     else:
         print("Using adata.X for Hotspot analysis.")

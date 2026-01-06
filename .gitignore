@@ -85,7 +85,7 @@ dmypy.json
 # Data files (adjust as needed)
 *.h5ad
 *.h5
-data/
+data/*
 *.png
 *.pkl
 *.txt
@@ -95,6 +95,7 @@ data/
 *.links
 *.checkpoint
 *.log
-trnspot/play.ipynb
+*.ipynb
 *report.html
 *report.pdf
+*.json
