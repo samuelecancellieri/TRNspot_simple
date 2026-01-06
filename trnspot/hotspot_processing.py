@@ -169,13 +169,13 @@ def plot_hotspot_annotation(
 
     # Save the figure
     plt.savefig(
-        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.pdf",
+        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.png",
         dpi=300,
         bbox_inches="tight",
     )
     plt.close()
     print(
-        f"  ✓ Saved annotated heatmap to: {config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.pdf"
+        f"  ✓ Saved annotated heatmap to: {config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlation_heatmap_with_annotations.png"
     )
 
 
@@ -404,7 +404,7 @@ def run_hotspot_analysis(
 
     plt.close("all")
     hotspot_obj.plot_local_correlations()
-    plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.pdf", dpi=300)
+    plt.savefig(f"{config.FIGURES_DIR_HOTSPOT}/hotspot_local_correlations.png", dpi=300)
     plt.close()
 
     plot_hotspot_annotation(hotspot_obj)
@@ -542,13 +542,13 @@ def plot_module_scores_violin(
     )
     plt.tight_layout()
     plt.savefig(
-        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_per_cluster.pdf",
+        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_per_cluster.png",
         dpi=300,
         bbox_inches="tight",
     )
     plt.close()
     print(
-        f"  ✓ Saved violin plots to: {config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_per_cluster.pdf"
+        f"  ✓ Saved violin plots to: {config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_per_cluster.png"
     )
 
     # Plot 2: All clusters in one violin plot (modules on x, clusters as hue)
@@ -578,11 +578,11 @@ def plot_module_scores_violin(
 
     plt.tight_layout()
     plt.savefig(
-        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_all_clusters.pdf",
+        f"{config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_all_clusters.png",
         dpi=300,
         bbox_inches="tight",
     )
     plt.close()
     print(
-        f"  ✓ Saved combined violin plot to: {config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_all_clusters.pdf"
+        f"  ✓ Saved combined violin plot to: {config.FIGURES_DIR_HOTSPOT}/hotspot_module_scores_violin_all_clusters.png"
     )

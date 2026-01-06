@@ -559,7 +559,7 @@ class PipelineController:
                     celloracle_result=celloracle_result,
                     hotspot_result=hotspot_result,
                     title="TRNspot Analysis Report",
-                    subtitle=self.args.input or "Example Dataset",
+                    subtitle=self.args.name,
                 )
 
         # Final summary
@@ -609,7 +609,7 @@ class PipelineController:
                 outputs = generate_report(
                     output_dir=self.args.output,
                     title="TRNspot Analysis Report",
-                    subtitle=f"Stratified Analysis ({len(self.adata_stratification_list)} stratifications)",
+                    subtitle=f"{self.args.name} - Stratified Analysis ({len(self.adata_stratification_list)} stratifications)",
                     adata=self.adata_preprocessed,
                     log_file=os.path.join(self.args.output, "logs", "pipeline.log"),
                     formats=["html", "pdf"],

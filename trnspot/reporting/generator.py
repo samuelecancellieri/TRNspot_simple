@@ -420,7 +420,65 @@ class ReportGenerator:
                 text-overflow: ellipsis;
             }
 
-            /* Subsection Tabs */
+            /* Subsection Tabs Navigation */
+            .tabs-container {
+                margin-top: 1.5rem;
+            }
+
+            .tabs-nav {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.25rem;
+                border-bottom: 2px solid var(--border-color);
+                margin-bottom: 0;
+            }
+
+            .tab-button {
+                padding: 0.75rem 1.25rem;
+                background: transparent;
+                border: none;
+                border-bottom: 3px solid transparent;
+                cursor: pointer;
+                font-size: 0.9rem;
+                font-weight: 500;
+                color: var(--secondary-color);
+                transition: all 0.2s;
+                margin-bottom: -2px;
+            }
+
+            .tab-button:hover {
+                color: var(--primary-color);
+                background: var(--background-color);
+            }
+
+            .tab-button.active {
+                color: var(--primary-color);
+                border-bottom-color: var(--primary-color);
+                background: var(--card-background);
+            }
+
+            .tab-content {
+                display: none;
+                padding: 1.5rem;
+                background: var(--background-color);
+                border: 1px solid var(--border-color);
+                border-top: none;
+                border-radius: 0 0 0.5rem 0.5rem;
+            }
+
+            .tab-content.active {
+                display: block;
+            }
+
+            .tab-content h3 {
+                color: var(--primary-color);
+                font-size: 1.1rem;
+                margin: 0 0 1rem 0;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            /* Legacy subsection styling (for non-tabbed content) */
             .subsection {
                 background: var(--background-color);
                 border: 1px solid var(--border-color);
@@ -623,6 +681,26 @@ class ReportGenerator:
                 if (e.key === 'ArrowRight') navigateLightbox(1);
             });
 
+            // Tab navigation functionality
+            function switchTab(containerId, tabId) {
+                const container = document.getElementById(containerId);
+                if (!container) return;
+                
+                // Hide all tab contents and deactivate all buttons
+                container.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                container.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                
+                // Show selected tab content and activate button
+                const tabContent = document.getElementById(tabId);
+                const tabButton = container.querySelector(`[data-tab="${tabId}"]`);
+                if (tabContent) tabContent.classList.add('active');
+                if (tabButton) tabButton.classList.add('active');
+            }
+
             // Active navigation highlighting
             const observer = new IntersectionObserver((entries) => {
                 entries.forEach(entry => {
@@ -751,21 +829,48 @@ class ReportGenerator:
         return "".join(html_parts)
 
     def _render_section(self, section: ReportSection, idx: int) -> str:
-        """Render a single section as HTML."""
+        """Render a single section as HTML with tabbed navigation for subsections."""
         section_id = section.section_id or f"section-{idx}"
 
         subsections_html = ""
         if section.subsections:
+            # Create tab navigation container
+            tabs_container_id = f"{section_id}-tabs"
+
+            # Build tab buttons
+            tab_buttons = []
             for sub_idx, subsection in enumerate(section.subsections):
-                subsections_html += f"""
-                <div class="subsection" id="{subsection.section_id}">
-                    <h3>{subsection.title}</h3>
+                is_active = "active" if sub_idx == 0 else ""
+                tab_id = f"{section_id}-tab-{sub_idx}"
+                tab_buttons.append(
+                    f'<button class="tab-button {is_active}" data-tab="{tab_id}" '
+                    f"onclick=\"switchTab('{tabs_container_id}', '{tab_id}')\">{subsection.title}</button>"
+                )
+
+            # Build tab contents
+            tab_contents = []
+            for sub_idx, subsection in enumerate(section.subsections):
+                is_active = "active" if sub_idx == 0 else ""
+                tab_id = f"{section_id}-tab-{sub_idx}"
+                tab_contents.append(
+                    f"""
+                <div class="tab-content {is_active}" id="{tab_id}">
                     {self._render_metrics(subsection.metrics)}
                     <div class="content">{subsection.content}</div>
                     {self._render_figures(subsection.figures, gallery_id=f"{section_id}-gallery-{sub_idx}")}
                     {self._render_tables(subsection.tables)}
                 </div>
                 """
+                )
+
+            subsections_html = f"""
+            <div class="tabs-container" id="{tabs_container_id}">
+                <div class="tabs-nav">
+                    {"".join(tab_buttons)}
+                </div>
+                {"".join(tab_contents)}
+            </div>
+            """
 
         return f"""
         <div class="section" id="{section_id}">
@@ -779,22 +884,18 @@ class ReportGenerator:
         """
 
     def _render_sidebar(self) -> str:
-        """Render navigation sidebar."""
+        """Render navigation sidebar with main sections only (subsections are tabs)."""
         items = []
         for section in self.report_data.sections:
             items.append(
                 f'<li><a href="#{section.section_id}">{section.title}</a></li>'
             )
-
-            # Add subsections
-            for subsection in section.subsections:
-                items.append(
-                    f'<li class="subsection"><a href="#{subsection.section_id}">{subsection.title}</a></li>'
-                )
+            # Subsections are now rendered as tabs within their parent section,
+            # so we don't add them to the sidebar navigation
 
         return f"""
         <nav class="sidebar">
-            <div class="sidebar-header">📋 Contents</div>
+            <div class="sidebar-header">Contents</div>
             <ul>{"".join(items)}</ul>
         </nav>
         """
@@ -850,9 +951,9 @@ class ReportGenerator:
             <div class="main-content">
                 <div class="container">
                     <header>
-                        <h1>🧬 {self.report_data.title}</h1>
+                        <h1>{self.report_data.title}</h1>
                         <div class="subtitle">{self.report_data.subtitle}</div>
-                        <div class="timestamp">📅 Generated: {self.report_data.timestamp}</div>
+                        <div class="timestamp">Generated: {self.report_data.timestamp}</div>
                     </header>
 
                     {sections_html}
@@ -874,7 +975,7 @@ class ReportGenerator:
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(html)
-            print(f"✓ HTML report saved to: {output_path}")
+            print(f"HTML report saved to: {output_path}")
 
         return html
 

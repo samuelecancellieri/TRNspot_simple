@@ -124,7 +124,7 @@ def create_data_summary_section(
     # Dataset dimensions
     content_parts.append(
         """
-    <h3>📊 Dataset Overview</h3>
+    <h3>Dataset Overview</h3>
     <p>Summary of the input single-cell RNA-seq dataset.</p>
     """
     )
@@ -140,7 +140,7 @@ def create_data_summary_section(
                 sample_vals += "..."
             obs_rows.append([col, dtype, n_unique, sample_vals])
 
-        content_parts.append("<h3>🏷️ Cell Annotations (obs)</h3>")
+        content_parts.append("<h3>Cell Annotations (obs)</h3>")
         content_parts.append(
             f"<p>Found {len(adata.obs.columns)} annotation columns:</p>"
         )
@@ -148,7 +148,7 @@ def create_data_summary_section(
     # Variable annotations
     if adata.var.columns.any():
         var_cols = list(adata.var.columns[:10])
-        content_parts.append("<h3>🧬 Gene Annotations (var)</h3>")
+        content_parts.append("<h3>Gene Annotations (var)</h3>")
         content_parts.append(
             f"<p>Found {len(adata.var.columns)} gene annotation columns: <code>{', '.join(var_cols)}</code></p>"
         )
@@ -159,13 +159,13 @@ def create_data_summary_section(
         for key in adata.obsm.keys():
             shape = adata.obsm[key].shape
             embeddings.append(f"<code>{key}</code> ({shape[1]} dims)")
-        content_parts.append("<h3>🗺️ Embeddings (obsm)</h3>")
+        content_parts.append("<h3>Embeddings (obsm)</h3>")
         content_parts.append(f"<p>Available embeddings: {', '.join(embeddings)}</p>")
 
     # Layers
     if adata.layers:
         layers = [f"<code>{key}</code>" for key in adata.layers.keys()]
-        content_parts.append("<h3>📚 Data Layers</h3>")
+        content_parts.append("<h3>Data Layers</h3>")
         content_parts.append(f"<p>Available layers: {', '.join(layers)}</p>")
 
     # Tables
@@ -180,7 +180,7 @@ def create_data_summary_section(
         )
 
     return ReportSection(
-        title="📂 Input Data Summary",
+        title="Input Data Summary",
         section_id="data-summary",
         content="\n".join(content_parts),
         metrics=metrics,
@@ -250,7 +250,7 @@ def create_settings_section() -> ReportSection:
         content_parts.append(
             f"""
         <div class="settings-category">
-            <h4>⚙️ {category}</h4>
+            <h4>{category}</h4>
             <dl>{settings_html}</dl>
         </div>
         """
@@ -259,7 +259,7 @@ def create_settings_section() -> ReportSection:
     content_parts.append("</div>")
 
     return ReportSection(
-        title="⚙️ Configuration Settings",
+        title="Configuration Settings",
         section_id="settings",
         content="\n".join(content_parts),
     )
@@ -295,14 +295,14 @@ def create_qc_section(
     <p>Quality control was performed to filter out low-quality cells and uninformative genes.
     The following metrics were calculated and filtering thresholds applied:</p>
 
-    <h3>📋 QC Metrics Calculated</h3>
+    <h3>QC Metrics Calculated</h3>
     <ul>
         <li><strong>n_genes_by_counts:</strong> Number of genes with at least 1 count per cell</li>
         <li><strong>total_counts:</strong> Total number of counts per cell</li>
         <li><strong>pct_counts_mt:</strong> Percentage of counts from mitochondrial genes</li>
     </ul>
 
-    <h3>🔍 Filtering Criteria</h3>
+    <h3>Filtering Criteria</h3>
     <ul>
         <li>Removed cells with too few detected genes</li>
         <li>Removed cells with abnormally low/high total counts</li>
@@ -315,7 +315,7 @@ def create_qc_section(
     figures = _find_figures(output_dir, ["figures/qc", "qc"])
 
     return ReportSection(
-        title="🔬 Quality Control",
+        title="Quality Control",
         section_id="qc",
         content=content,
         figures=figures,
@@ -346,7 +346,7 @@ def create_preprocessing_section(
     content = """
     <p>Data preprocessing was performed to normalize and prepare the data for downstream analysis.</p>
 
-    <h3>📊 Preprocessing Steps</h3>
+    <h3>Preprocessing Steps</h3>
     <ol>
         <li><strong>Normalization:</strong> Library size normalization to account for differences in sequencing depth</li>
         <li><strong>Log transformation:</strong> Log(x + 1) transformation to stabilize variance</li>
@@ -354,7 +354,7 @@ def create_preprocessing_section(
         <li><strong>Scaling:</strong> Z-score scaling for PCA computation</li>
     </ol>
 
-    <h3>💡 Technical Details</h3>
+    <h3>Technical Details</h3>
     <ul>
         <li>Normalization target sum: 10,000 counts per cell (CPM-like)</li>
         <li>HVG selection method: Seurat v3 (highly_variable_genes with flavor='seurat_v3')</li>
@@ -363,7 +363,7 @@ def create_preprocessing_section(
     """
 
     return ReportSection(
-        title="🔧 Preprocessing",
+        title="Preprocessing",
         section_id="preprocessing",
         content=content,
         metrics=metrics,
@@ -416,14 +416,14 @@ def create_clustering_section(
     content = """
     <p>Dimensionality reduction and clustering were performed to identify cell populations.</p>
 
-    <h3>📉 Dimensionality Reduction</h3>
+    <h3>Dimensionality Reduction</h3>
     <ol>
         <li><strong>PCA:</strong> Principal Component Analysis for initial dimensionality reduction</li>
         <li><strong>Neighbor Graph:</strong> K-nearest neighbor graph construction</li>
         <li><strong>UMAP:</strong> Uniform Manifold Approximation and Projection for 2D visualization</li>
     </ol>
 
-    <h3>🎯 Clustering</h3>
+    <h3>Clustering</h3>
     <p>Graph-based clustering using the Leiden algorithm was applied to identify cell populations
     with similar transcriptional profiles.</p>
     """
@@ -432,7 +432,7 @@ def create_clustering_section(
     figures = _find_embedding_figures(output_dir, max_figures=10)
 
     return ReportSection(
-        title="🎨 Clustering & Visualization",
+        title="Clustering & Visualization",
         section_id="clustering",
         content=content,
         figures=figures,
@@ -488,7 +488,10 @@ def create_celloracle_section(
     output_dir: str,
 ) -> ReportSection:
     """
-    Create CellOracle GRN Analysis section with score-based tabs.
+    Create CellOracle GRN Analysis section with centrality score categories only.
+
+    Organizes plots by score type (eigenvector, betweenness, degree centralities)
+    and excludes network graphs and other miscellaneous plots.
     """
     metrics = {}
 
@@ -517,7 +520,7 @@ def create_celloracle_section(
     <p>Gene Regulatory Network (GRN) inference was performed using CellOracle to identify
     transcription factor regulatory relationships from single-cell expression data.</p>
 
-    <h3>🔬 Analysis Pipeline</h3>
+    <h3>Analysis Pipeline</h3>
     <ol>
         <li><strong>Preprocessing:</strong> Diffusion map computation and PAGA graph construction</li>
         <li><strong>Oracle Initialization:</strong> Integration of expression data with base GRN from promoter analysis</li>
@@ -525,70 +528,53 @@ def create_celloracle_section(
         <li><strong>Centrality Analysis:</strong> Calculation of network centrality scores for TF ranking</li>
     </ol>
 
-    <h3>📊 Network Scores Computed</h3>
+    <h3>Network Scores Computed</h3>
     <ul>
         <li><strong>Degree centrality:</strong> Number of connections (in/out/all)</li>
         <li><strong>Betweenness centrality:</strong> How often a TF lies on shortest paths</li>
         <li><strong>Eigenvector centrality:</strong> Influence based on connections to influential nodes</li>
     </ul>
 
-    <h3>📁 Output Files</h3>
+    <h3>Output Files</h3>
     <ul>
         <li><code>celloracle/oracle_object.celloracle.oracle</code> - Oracle object</li>
         <li><code>celloracle/oracle_object.celloracle.links</code> - Links object</li>
         <li><code>celloracle/grn_merged_scores.csv</code> - Network centrality scores</li>
         <li><code>celloracle/grn_filtered_links.pkl</code> - Filtered regulatory links</li>
     </ul>
-    
-    <p><em>See tabs below for detailed plots organized by score type.</em></p>
     """
 
-    # Define score categories with display names and search patterns
+    # Define score categories - ONLY centrality scores, no network graphs or other plots
     score_categories = [
         ("Eigenvector Centrality", "eigenvector"),
         ("Betweenness Centrality", "betweenness"),
-        ("Degree (All)", "degree_all"),
-        ("Degree (In)", "degree_in"),
-        ("Degree (Out)", "degree_out"),
         ("Degree Centrality (All)", "degree_centrality_all"),
         ("Degree Centrality (In)", "degree_centrality_in"),
         ("Degree Centrality (Out)", "degree_centrality_out"),
-        ("Network Graphs", "network"),
-        ("Other GRN Plots", None),  # Catch-all for remaining plots
     ]
 
-    # Collect figures for each category
+    # Collect figures for each score category
     subsections = []
     used_figures = set()
 
     for display_name, pattern in score_categories:
-        if pattern is None:
-            # "Other" category - get all remaining figures not yet categorized
-            all_grn_figures = _find_figures(
-                output_dir,
-                ["figures/grn", "figures/grn/grn_deep_analysis", "grn_deep_analysis"],
-                max_figures=100,
-            )
-            category_figures = [f for f in all_grn_figures if f not in used_figures]
-        else:
-            category_figures = _find_grn_figures_by_score(output_dir, pattern)
-            # Remove figures already used in more specific categories
-            # (e.g., degree_centrality_all should not appear in degree_all)
-            category_figures = [f for f in category_figures if f not in used_figures]
+        category_figures = _find_grn_figures_by_score(output_dir, pattern)
+        # Remove figures already used in more specific categories
+        category_figures = [f for f in category_figures if f not in used_figures]
 
         if category_figures:
             used_figures.update(category_figures)
             subsections.append(
                 ReportSection(
-                    title=f"📊 {display_name}",
-                    section_id=f"grn-{pattern or 'other'}".replace("_", "-"),
-                    content=f"<p>{len(category_figures)} plots for {display_name.lower()} analysis.</p>",
-                    figures=category_figures[:20],  # Limit per category
+                    title=display_name,
+                    section_id=f"grn-{pattern.replace('_', '-')}",
+                    content=f"<p>{len(category_figures)} plots showing {display_name.lower()} scores across clusters.</p>",
+                    figures=category_figures[:20],
                 )
             )
 
     return ReportSection(
-        title="🧬 CellOracle GRN Analysis",
+        title="CellOracle GRN Analysis",
         section_id="celloracle",
         content=content,
         metrics=metrics,
@@ -620,7 +606,7 @@ def create_hotspot_section(
     <p>Hotspot analysis was performed to identify groups of genes that show spatially
     coordinated expression patterns across cells.</p>
 
-    <h3>🔬 Analysis Steps</h3>
+    <h3>Analysis Steps</h3>
     <ol>
         <li><strong>KNN Graph:</strong> Cell-cell similarity graph construction from PCA space</li>
         <li><strong>Autocorrelation:</strong> Testing genes for local autocorrelation using Geary's C</li>
@@ -628,11 +614,11 @@ def create_hotspot_section(
         <li><strong>Module Detection:</strong> Hierarchical clustering of correlated genes into modules</li>
     </ol>
 
-    <h3>📊 Module Analysis</h3>
+    <h3>Module Analysis</h3>
     <p>Gene modules represent co-expressed gene programs that may correspond to biological
     processes, cell states, or regulatory programs.</p>
 
-    <h3>📁 Output Files</h3>
+    <h3>Output Files</h3>
     <ul>
         <li><code>hotspot/autocorrelation_results.csv</code> - Gene autocorrelation statistics</li>
         <li><code>hotspot/significant_genes.csv</code> - Significantly autocorrelated genes</li>
@@ -644,7 +630,7 @@ def create_hotspot_section(
     figures = _find_figures(output_dir, ["figures/hotspot", "hotspot"], max_figures=20)
 
     return ReportSection(
-        title="🔥 Hotspot Gene Modules",
+        title="Hotspot Gene Modules",
         section_id="hotspot",
         content=content,
         figures=figures,
@@ -721,7 +707,7 @@ def create_operations_log_section(
     """
 
     return ReportSection(
-        title="📜 Operations Log",
+        title="Operations Log",
         section_id="operations-log",
         content=content,
     )
@@ -755,7 +741,7 @@ def create_plot_gallery_section(
     content = f"""
     <p>All plots are shown in their respective analysis sections above.</p>
     
-    <h3>📊 Plot Summary</h3>
+    <h3>Plot Summary</h3>
     <ul>
         <li><strong>Quality Control:</strong> {qc_count} plots 
             (see <a href="#qc">QC Section</a>)</li>
@@ -767,7 +753,7 @@ def create_plot_gallery_section(
             (see <a href="#hotspot">Hotspot Section</a>)</li>
     </ul>
     
-    <h3>📁 Figure Locations</h3>
+    <h3>Figure Locations</h3>
     <pre><code>{output_dir}/figures/
 ├── qc/           # Quality control plots
 ├── grn/          # GRN and network analysis plots
@@ -777,7 +763,7 @@ def create_plot_gallery_section(
     """
 
     return ReportSection(
-        title="🖼️ Plot Summary",
+        title="Plot Summary",
         section_id="plot-gallery",
         content=content,
         metrics={"Total Plots": total_figures},
@@ -798,20 +784,18 @@ def create_stratification_summary_section(
     for name in stratification_names:
         strat_dir = os.path.join(output_dir, "stratified_analysis", name)
         if os.path.exists(strat_dir):
-            strat_items.append(
-                f"<li>✅ <strong>{name}</strong> - Analysis completed</li>"
-            )
+            strat_items.append(f"<li><strong>{name}</strong> - Analysis completed</li>")
         else:
-            strat_items.append(f"<li>⏳ <strong>{name}</strong> - Pending</li>")
+            strat_items.append(f"<li><strong>{name}</strong> - Pending</li>")
 
     content = f"""
     <p>The data was stratified into {n_strats} subsets for independent analysis.
     Each stratification was processed through the full analysis pipeline.</p>
 
-    <h3>📊 Stratifications Analyzed</h3>
+    <h3>Stratifications Analyzed</h3>
     <ul>{"".join(strat_items)}</ul>
 
-    <h3>📁 Output Structure</h3>
+    <h3>Output Structure</h3>
     <p>Results for each stratification are saved in:</p>
     <pre><code>{output_dir}/stratified_analysis/&lt;stratification_name&gt;/
 ├── clustered_adata.h5ad
@@ -822,7 +806,7 @@ def create_stratification_summary_section(
     """
 
     return ReportSection(
-        title="📂 Stratified Analysis Summary",
+        title="Stratified Analysis Summary",
         section_id="stratification",
         content=content,
         metrics={"Stratifications": n_strats},
